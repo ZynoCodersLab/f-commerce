@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { DrizzleCustomerRepository } from './customer.repository.js';
 import { getDb } from '../client.js';
-import { startPg, stopPg, resetDatabase } from '../../../../test-support/pg-test-database.js';
+import {
+  startPg,
+  stopPg,
+  resetDatabase,
+  seedMembership,
+} from '../../../../test-support/pg-test-database.js';
 import { runWithContext } from '../context.js';
 import { OrderStatus } from '../../../../domain/entities/order.entity.js';
 import { businesses, customers, orders, auditLogs } from '../schema.js';
@@ -123,6 +128,7 @@ describe('DrizzleCustomerRepository', () => {
   beforeEach(async () => {
     await resetDatabase();
     await seedBusiness(BIZ_A);
+    await seedMembership(BIZ_A, USER, 'OWNER');
     await seedBusiness(BIZ_B);
   });
 
