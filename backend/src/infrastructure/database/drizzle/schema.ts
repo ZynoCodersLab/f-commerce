@@ -33,15 +33,23 @@ export const businesses = pgTable('businesses', {
   ...timestamps,
 });
 
-export const users = pgTable('users', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  email: text('email').notNull().unique(),
-  passwordHash: text('password_hash'),
-  name: text('name').notNull(),
-  oauth: jsonb('oauth').$type<{ provider: string; providerId: string }[]>().notNull().default([]),
-  isActive: boolean('is_active').notNull().default(true),
-  ...timestamps,
-});
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    email: text('email').notNull().unique(),
+    passwordHash: text('password_hash'),
+    name: text('name').notNull(),
+    oauth: jsonb('oauth').$type<{ provider: string; providerId: string }[]>().notNull().default([]),
+    isActive: boolean('is_active').notNull().default(true),
+    ...timestamps,
+  },
+  (table) => [
+    // Email identity is case insensitive (AC-18), so two accounts can never
+    // differ only by letter case.
+    uniqueIndex('users_email_lower_unq').on(sql`lower(${table.email})`),
+  ],
+);
 
 export const businessMembers = pgTable(
   'business_members',
@@ -54,10 +62,53 @@ export const businessMembers = pgTable(
       .notNull()
       .references(() => users.id),
     role: text('role').notNull(),
+    // ACTIVE, REMOVED, or INVITED (legacy rows only; the migration deletes them).
     status: text('status').notNull().default('ACTIVE'),
+    removedAt: timestamp('removed_at', { withTimezone: true }),
     ...timestamps,
   },
-  (table) => [uniqueIndex('business_members_business_user_unq').on(table.businessId, table.userId)],
+  (table) => [
+    uniqueIndex('business_members_business_user_unq').on(table.businessId, table.userId),
+    index('business_members_business_status_idx').on(table.businessId, table.status),
+    index('business_members_user_status_idx').on(table.userId, table.status),
+  ],
+);
+
+export const invitations = pgTable(
+  'invitations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: uuid('business_id')
+      .notNull()
+      .references(() => businesses.id, { onDelete: 'cascade' }),
+    email: text('email').notNull(),
+    role: text('role').notNull().default('STAFF'),
+    // SHA 256 hex of the 32 random bytes handed out once. The raw token is
+    // never stored (AC-20).
+    tokenHash: text('token_hash').notNull(),
+    invitedByUserId: uuid('invited_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    acceptedByUserId: uuid('accepted_by_user_id').references(() => users.id),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    lastSentAt: timestamp('last_sent_at', { withTimezone: true }).notNull().defaultNow(),
+    emailStatus: text('email_status').notNull().default('QUEUED'),
+    emailAttempts: integer('email_attempts').notNull().default(0),
+    lastEmailError: text('last_email_error'),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('invitations_token_hash_unq').on(table.tokenHash),
+    index('invitations_business_email_idx').on(table.businessId, table.email),
+    // One live invite per business and email (AC-11).
+    uniqueIndex('invitations_business_email_live_unq')
+      .on(table.businessId, sql`lower(${table.email})`)
+      .where(sql`${table.acceptedAt} is null and ${table.revokedAt} is null`),
+    index('invitations_business_expires_idx').on(table.businessId, table.expiresAt),
+  ],
 );
 
 export const refreshTokens = pgTable(

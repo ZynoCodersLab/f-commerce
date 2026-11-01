@@ -18,12 +18,6 @@ export const OAuthLoginSchema = z.object({
   providerId: z.string().min(1, 'Provider ID is required'),
 });
 
-export const InviteStaffSchema = z.object({
-  email: z.string().email('Invalid email format'),
-  role: z.enum(['OWNER', 'STAFF']),
-});
-
 export type RegisterRequest = z.infer<typeof RegisterSchema>;
 export type LoginRequest = z.infer<typeof LoginSchema>;
 export type OAuthLoginRequest = z.infer<typeof OAuthLoginSchema>;
-export type InviteStaffRequest = z.infer<typeof InviteStaffSchema>;
