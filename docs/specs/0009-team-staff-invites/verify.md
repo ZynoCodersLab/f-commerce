@@ -16,7 +16,7 @@ Run these checks after the build. Each section names the acceptance criteria it 
 - [ ] `npm run lint` passes.
 - [ ] `npm run typecheck` passes.
 - [ ] `npm run format:check` passes.
-- [ ] `npm run test` passes (backend 34 files, 493 tests, 1 skipped; frontend 312 tests; contracts 119 tests).
+- [ ] `npm run test` passes (backend 32 files, 493 tests, 1 skipped including the Redis cases above; frontend 312 tests; contracts 119 tests).
 - [ ] `npm run build` passes with `API_ORIGIN` set.
 - [ ] `cd frontend && npx playwright test` passes with the API and the worker running, including `e2e/team-invites.spec.ts`.
 

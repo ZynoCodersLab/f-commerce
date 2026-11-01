@@ -62,7 +62,7 @@ export class RedisRateLimitStore implements Store {
 
   async decrement(key: string): Promise<void> {
     try {
-      await this.redis.decr(this.keyFor(key));
+      await Promise.resolve(this.redis.decr(this.keyFor(key)));
     } catch {
       this.local.decrement(key);
     }
@@ -70,7 +70,7 @@ export class RedisRateLimitStore implements Store {
 
   async resetKey(key: string): Promise<void> {
     try {
-      await this.redis.del(this.keyFor(key));
+      await Promise.resolve(this.redis.del(this.keyFor(key)));
     } catch {
       this.local.resetKey(key);
     }
