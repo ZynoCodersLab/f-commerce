@@ -10,7 +10,7 @@ export interface IAuthRepository {
     businessId: string;
     userId: string;
     role: 'OWNER' | 'STAFF';
-    status: 'ACTIVE' | 'INVITED';
+    status: 'ACTIVE' | 'INVITED' | 'REMOVED';
   }): Promise<void>;
   findBusinessMember(businessId: string, userId: string): Promise<unknown | null>;
   findUserBusinesses(userId: string): Promise<unknown[]>;

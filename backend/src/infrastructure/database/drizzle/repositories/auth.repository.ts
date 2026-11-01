@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { getDb } from '../client.js';
 import { users, businesses, businessMembers, refreshTokens } from '../schema.js';
 import type { User } from '../../../../domain/entities/user.entity.js';
@@ -18,8 +18,12 @@ function toUser(row: typeof users.$inferSelect): User {
 }
 
 export class DrizzleAuthRepository implements IAuthRepository {
+  /** Email is compared case insensitively, so sign in never depends on casing. */
   async findUserByEmail(email: string): Promise<User | null> {
-    const result = await getDb().select().from(users).where(eq(users.email, email));
+    const result = await getDb()
+      .select()
+      .from(users)
+      .where(sql`lower(${users.email}) = lower(${email.trim()})`);
     return result.length > 0 ? toUser(result[0]) : null;
   }
 
@@ -71,7 +75,7 @@ export class DrizzleAuthRepository implements IAuthRepository {
     businessId: string;
     userId: string;
     role: 'OWNER' | 'STAFF';
-    status: 'ACTIVE' | 'INVITED';
+    status: 'ACTIVE' | 'INVITED' | 'REMOVED';
   }): Promise<void> {
     await getDb().insert(businessMembers).values({
       businessId: data.businessId,

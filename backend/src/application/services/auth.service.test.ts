@@ -4,7 +4,7 @@ import { IAuthRepository } from '../../domain/repositories/auth.repository.js';
 import { User } from '../../domain/entities/user.entity.js';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { DuplicateEmailError, UnauthorizedError, ConflictError } from '../../domain/errors.js';
+import { DuplicateEmailError, UnauthorizedError } from '../../domain/errors.js';
 
 vi.mock('bcrypt');
 vi.mock('jsonwebtoken');
@@ -195,33 +195,6 @@ describe('AuthService', () => {
 
       expect(result.user).toEqual({ id: 'u1', email: 'e', name: 'n', isActive: true });
       expect(result.businesses).toHaveLength(1);
-    });
-  });
-
-  describe('inviteStaff', () => {
-    it('creates new user if not exists', async () => {
-      mockAuthRepository.findUserByEmail.mockResolvedValueOnce(null);
-      mockAuthRepository.createUser.mockResolvedValueOnce({ id: 'u1' } as User);
-      mockAuthRepository.findBusinessMember.mockResolvedValueOnce(null);
-
-      await authService.inviteStaff('t@t.com', 'STAFF', 'b1');
-
-      expect(mockAuthRepository.createUser).toHaveBeenCalled();
-      expect(mockAuthRepository.createBusinessMember).toHaveBeenCalledWith({
-        businessId: 'b1',
-        userId: 'u1',
-        role: 'STAFF',
-        status: 'INVITED',
-      });
-    });
-
-    it('throws if already member', async () => {
-      mockAuthRepository.findUserByEmail.mockResolvedValueOnce({ id: 'u1' } as User);
-      mockAuthRepository.findBusinessMember.mockResolvedValueOnce({ role: 'STAFF' });
-
-      await expect(authService.inviteStaff('t@t.com', 'STAFF', 'b1')).rejects.toThrow(
-        ConflictError,
-      );
     });
   });
 });

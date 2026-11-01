@@ -200,3 +200,80 @@ export class DuplicateOrderError extends ConflictError {
     super(message);
   }
 }
+
+// --- Team and invitation errors ---
+
+export class InviteNotFoundError extends NotFoundError {
+  constructor(message: string = 'This invitation could not be found') {
+    super(message);
+  }
+}
+
+export class InviteExpiredError extends DomainError {
+  constructor(message: string = 'This invitation has expired') {
+    super(message);
+  }
+}
+
+export class InviteRevokedError extends DomainError {
+  constructor(message: string = 'This invitation was cancelled') {
+    super(message);
+  }
+}
+
+export class InviteAlreadyAcceptedError extends ConflictError {
+  constructor(message: string = 'This invitation was already accepted') {
+    super(message);
+  }
+}
+
+export class InviteAlreadyMemberError extends ConflictError {
+  constructor(message: string = 'This person is already a member of this business') {
+    super(message);
+  }
+}
+
+export class InviteAlreadyPendingError extends ConflictError {
+  constructor(
+    public readonly invitationId: string,
+    message: string = 'An invitation for this email is already waiting to be accepted',
+  ) {
+    super(message);
+  }
+}
+
+export class SignInRequiredError extends DomainError {
+  constructor(message: string = 'Sign in to the invited account to accept this invitation') {
+    super(message);
+  }
+}
+
+export class EmailMismatchError extends DomainError {
+  constructor(message: string = 'This invitation belongs to a different email address') {
+    super(message);
+  }
+}
+
+export class LastOwnerError extends ConflictError {
+  constructor(message: string = 'A business must keep at least one owner') {
+    super(message);
+  }
+}
+
+export class SelfChangeNotAllowedError extends ConflictError {
+  constructor(message: string = 'You cannot change your own role or remove yourself') {
+    super(message);
+  }
+}
+
+export class TeamMemberNotFoundError extends NotFoundError {
+  constructor(message: string = 'This team member could not be found') {
+    super(message);
+  }
+}
+
+export class BusinessAccessDeniedError extends DomainError {
+  constructor(message: string = 'You do not have access to this business') {
+    super(message);
+  }
+}
