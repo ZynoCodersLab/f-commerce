@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
+import { productionEmailProblems } from './config.js';
 
 // We test the env schema logic by re-defining it here (mirroring config.ts)
 // and validating against controlled inputs. This avoids spawning child processes
@@ -32,6 +33,12 @@ const envSchema = z.object({
   CLOUDINARY_API_KEY: z.string().default(''),
   CLOUDINARY_API_SECRET: z.string().default(''),
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
+  APP_ORIGIN: z.string().url().default('http://localhost:3000'),
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z
+    .preprocess((value) => (value === '' ? undefined : value), z.string())
+    .default('F Commerce <onboarding@resend.dev>'),
+  EMAIL_REPLY_TO: z.string().optional(),
 });
 
 describe('config env schema', () => {
@@ -189,5 +196,40 @@ describe('config env schema', () => {
         expect(result.data.PORT).toBe('4000');
       }
     });
+  });
+});
+
+describe('production email requirements', () => {
+  it('requires a provider and a sender in production', () => {
+    expect(
+      productionEmailProblems({
+        NODE_ENV: 'production',
+        RESEND_API_KEY: undefined,
+        EMAIL_FROM: '',
+      }),
+    ).toEqual([
+      'RESEND_API_KEY is required in production.',
+      'EMAIL_FROM is required in production.',
+    ]);
+  });
+
+  it('is satisfied in production when both are set', () => {
+    expect(
+      productionEmailProblems({
+        NODE_ENV: 'production',
+        RESEND_API_KEY: 're_live',
+        EMAIL_FROM: 'F Commerce <team@example.com>',
+      }),
+    ).toEqual([]);
+  });
+
+  it('never blocks a development machine', () => {
+    expect(
+      productionEmailProblems({
+        NODE_ENV: 'development',
+        RESEND_API_KEY: undefined,
+        EMAIL_FROM: '',
+      }),
+    ).toEqual([]);
   });
 });
