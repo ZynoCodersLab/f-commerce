@@ -42,7 +42,10 @@ const routes: RouteItem[] = [
   { href: '/products', label: 'Products', icon: Package },
 ];
 
-const secondaryRoutes: RouteItem[] = [{ href: '/settings', label: 'Settings', icon: Settings }];
+const secondaryRoutes: RouteItem[] = [
+  { href: '/settings', label: 'Settings', icon: Settings },
+  { href: '/settings/team', label: 'Team', icon: Users },
+];
 
 function isRouteActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);

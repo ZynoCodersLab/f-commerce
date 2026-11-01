@@ -123,6 +123,15 @@ export const nextConfig: NextConfig = {
         source: '/(.*)',
         headers: buildSecurityHeaders({ development: isDevelopment, production: isProduction }),
       },
+      {
+        // An invite link carries a secret in its path. Keep it out of Referer
+        // headers sent to other sites and out of search indexes.
+        source: '/invite/:path*',
+        headers: [
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+          { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
+        ],
+      },
     ];
   },
   async rewrites() {
