@@ -10,31 +10,31 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 
 ## At a glance
 
-| #   | Feature                           | Phase      | Status  |
-| --- | --------------------------------- | ---------- | ------- |
-| 1   | Stack & architecture              | Foundation | done    |
-| 2   | Data model                        | Foundation | done    |
-| 3   | Coding standards & tooling        | Foundation | done    |
-| 4   | Design system & UI foundation     | Foundation | done    |
-| 5   | Authentication & tenant isolation | Slice 1    | done    |
-| 6   | Business profile & onboarding     | Slice 1    | done    |
-| 7   | Customers                         | Slice 1    | done    |
-| 8   | Products & categories             | Slice 2    | done    |
-| 9   | Orders (CRUD + status workflow)   | Slice 2    | done    |
-| 10  | Payments                          | Slice 2    | planned |
-| 11  | Inventory management              | Slice 4    | planned |
-| 12  | Delivery & shipping               | Slice 4    | planned |
-| 13  | Expenses & profit calculation     | Slice 4    | planned |
-| 14  | Dashboard                         | Slice 4    | planned |
-| 15  | Reports                           | Slice 5    | planned |
-| 16  | Search & filters                  | Slice 5    | planned |
-| 17  | Notifications                     | Slice 5    | planned |
-| 18  | Invoice generation                | Slice 5    | planned |
-| 19  | OAuth provider login              | Slice 3    | planned |
-| 20  | Marketing site                    | Launch     | planned |
-| 21  | Product variant archiving         | Slice 2    | planned |
-| 22  | Business timezone                 | Slice 1    | done    |
-| 23  | Team & staff invites              | Slice 1    | planned |
+| #   | Feature                           | Phase      | Status      |
+| --- | --------------------------------- | ---------- | ----------- |
+| 1   | Stack & architecture              | Foundation | done        |
+| 2   | Data model                        | Foundation | done        |
+| 3   | Coding standards & tooling        | Foundation | done        |
+| 4   | Design system & UI foundation     | Foundation | done        |
+| 5   | Authentication & tenant isolation | Slice 1    | done        |
+| 6   | Business profile & onboarding     | Slice 1    | done        |
+| 7   | Customers                         | Slice 1    | done        |
+| 8   | Products & categories             | Slice 2    | done        |
+| 9   | Orders (CRUD + status workflow)   | Slice 2    | done        |
+| 10  | Payments                          | Slice 2    | planned     |
+| 11  | Inventory management              | Slice 4    | planned     |
+| 12  | Delivery & shipping               | Slice 4    | planned     |
+| 13  | Expenses & profit calculation     | Slice 4    | planned     |
+| 14  | Dashboard                         | Slice 4    | planned     |
+| 15  | Reports                           | Slice 5    | planned     |
+| 16  | Search & filters                  | Slice 5    | planned     |
+| 17  | Notifications                     | Slice 5    | planned     |
+| 18  | Invoice generation                | Slice 5    | planned     |
+| 19  | OAuth provider login              | Slice 3    | planned     |
+| 20  | Marketing site                    | Launch     | planned     |
+| 21  | Product variant archiving         | Slice 2    | planned     |
+| 22  | Business timezone                 | Slice 1    | done        |
+| 23  | Team & staff invites              | Slice 1    | in-progress |
 
 ## Foundations
 
@@ -160,13 +160,24 @@ Every business stores one IANA timezone and the console uses it for delivery dea
 - [x] Review it (fresh model): `/check review business timezone` — See [2026-10-29-feat-business-timezone.md](../reviews/2026-10-29-feat-business-timezone.md), approve with nits on GLM-5.3-Flash, all suites rerun; every open finding from the four earlier passes is fixed and pinned by a named test. Earlier passes: [2026-10-26](../reviews/2026-10-26-feat-business-timezone.md), [2026-10-27](../reviews/2026-10-27-feat-business-timezone.md), [2026-10-28](../reviews/2026-10-28-feat-business-timezone.md), [2026-10-28 2](../reviews/2026-10-28-feat-business-timezone-2.md), [2026-10-28 3](../reviews/2026-10-28-feat-business-timezone-3.md); the stale draft guard and the validated settings write all hold. Whole branch pass: [2026-10-31](../reviews/2026-10-31-feat-business-timezone-review.md), approve with nits on GLM-5.3-Flash, 1 minor and 8 nits, no blockers; the three minors from [2026-10-30](../reviews/2026-10-30-feat-business-timezone-whole-branch.md) are fixed and pinned by tests. The one 2026-10-31 minor is fixed too: a logo cleared at onboarding reads as `null` from the repository up, pinned by integration and contract tests. Second pass the same day: [2026-10-31 review 2](../reviews/2026-10-31-feat-business-timezone-review-2.md), approve with nits on GLM-5.3-Flash, 1 minor and 8 nits, no blockers; the logo fix holds on every read path, and the one minor is stale test fixtures that still use the empty string. That minor is fixed too: the onboarding and route test fixtures now use the shapes the API and entity produce. Third pass the same day, after `/check verify` and a full suite run: [2026-10-31 review 3](../reviews/2026-10-31-feat-business-timezone-review-3.md), approve with nits on GLM-5.3-Flash, 0 minors and 9 nits, no blockers; all four earlier findings are re-verified as holding and the open items are cleanup (dead statements, one duplicated pattern, one comment naming an error code that does not exist). All nine nits from that third pass are now cleared: dead statements and the duplicate export removed, the fallback operator aligned, the comment quoting the real error payload, the draft typed from the contracts, the suppression explained, the backend zone check reusing the contracts helper, the zone to country map pinned by a test, and the customer profile using the shared money format with its browser test updated. Fourth pass the same day, after the nit sweep: [2026-10-31 review 4](../reviews/2026-10-31-feat-business-timezone-review-4.md), approve on GLM-5.3-Flash with 1 nit, no blockers, majors or minors; all nine nits verified genuinely closed in code and tests, every earlier fix re-verified as holding, and the one suspected regression (the backend zone check now accepting padded zone strings) refuted because the previous local copy also trimmed. The one nit, a stale frontend test count in the spec verify notes, is fixed.
 - [x] Document it: `/document business timezone` — See [2026-10-29-feat-business-timezone.md](../PRs/2026-10-29-feat-business-timezone.md). Merged in [PR #22](https://github.com/ZynoCodex/f-commerce/pull/22), whose body is the current description of the shipped change.
 
-### 23. Team & staff invites · needs a decision
+### 23. Team & staff invites · in-progress
 
 Finish the staff invite that spec 0003 AC-5 requires. `POST /api/auth/invite` already creates an `INVITED` business member, but nothing delivers the invite, nothing accepts it, `INVITED` never becomes `ACTIVE`, and there is no team screen. Owners manage staff from settings: invite by email, see pending and active members, and change or remove a member's role. Staff keep the permissions the other slices already grant them.
 
 **Done when:** an owner invites a staff member by email, the invitee accepts through a link and sets a password, the membership becomes `ACTIVE`, the invited person can sign in with the permissions of their role, and the owner can view, change, and remove members from a team screen. An invited membership that is never accepted grants no access.
 
-- [ ] Design it (spec): `/architect team & staff invites`
+- [x] Design it (spec): `/architect team & staff invites`
+      Spec [0009](../specs/0009-team-staff-invites/index.md)
+- [x] Build it: `/develop team & staff invites` (branch `feat/team-staff-invites`, [spec](../specs/0009-team-staff-invites/index.md))
+  - [x] Data, contracts, and migration: invitations, membership status, case insensitive email, and legacy cleanup (AC-1, AC-5 to AC-8, AC-10, AC-14, AC-16, AC-18, AC-22)
+  - [x] Thin invite path: team repository and service, active membership check, queue, worker, Resend, and public accept API (AC-1 to AC-4, AC-6 to AC-11, AC-14, AC-15, AC-17, AC-19, AC-20, AC-23, AC-24)
+  - [x] Team and invite screens: member list, pending invites, invite dialog, copy link, poll, and accept states (AC-1, AC-5 to AC-9, AC-21)
+  - [x] Manage and harden: resend, cancel, role change, removal, token protections, audit, and access denial handling (AC-2, AC-4, AC-12 to AC-16, AC-18 to AC-20, AC-22, AC-24)
+  - [x] Deploy and test: root dev, worker start, CI with Redis and worker, deployment notes, and the full test matrix (AC-1 to AC-24)
+- [ ] Verify it: `/check verify team & staff invites`
+- [ ] Test it: `/test team & staff invites`
+- [ ] Review it (fresh model): `/check review team & staff invites`
+- [ ] Document it: `/document team & staff invites`
 
 ## Slice 2: Product & Order Workflow
 
@@ -333,3 +344,4 @@ Out of scope for the current build pass, kept so the plan stays honest.
 - **Social channel APIs**: Facebook/WhatsApp order import via future integrations
 - **Advanced analytics**: AI insights after basic reporting works
 - **Platform admin console**: a console for the people who run F-Commerce itself, deferred until the MVP proves fit. It is the first feature that may read across tenants, so it needs its own admin role, its own audit trail naming the admin, the target, and what changed, and a deliberate route around the tenant isolation that every seller-facing query enforces. The first version covers finding and opening any business or user, resetting a locked-out account, and the support actions existing slices already assume someone can do by hand, such as cleaning up orphaned Cloudinary assets. Seller-facing isolation must stay unchanged, and a business OWNER or STAFF gets 403 on every admin route
+- **Team follow-ups from spec 0009**: Resend bounce and complaint webhooks, an invitation retention job, email delivery metrics and alerts, team seat limits when plans and billing exist, an owner leave business flow, OAuth only acceptance when real OAuth ships, and a team history view for accepted, revoked, and removed members. None blocks the invite slice.

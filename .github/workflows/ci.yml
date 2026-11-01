@@ -25,6 +25,14 @@ jobs:
           until docker exec postgres pg_isready -U postgres -d f-commerce > /dev/null 2>&1; do
             sleep 1
           done
+      # Invitation emails are sent by a separate worker through BullMQ, so the
+      # end to end flow needs a real Redis next to Postgres (spec 0009).
+      - name: Start Redis
+        run: |
+          docker run -d --name redis -p 6379:6379 redis:7.4
+          until docker exec redis redis-cli ping > /dev/null 2>&1; do
+            sleep 1
+          done
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -48,11 +56,20 @@ jobs:
           NODE_ENV: test
           PORT: 4000
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/f-commerce
+          REDIS_URL: redis://127.0.0.1:6379
+          APP_ORIGIN: http://localhost:3000
           CORS_ORIGINS: http://localhost:3000
           # The suite creates many accounts from one IP; limiter behavior is
           # covered by the backend test suite instead.
           RATE_LIMIT_DISABLED: 'true'
         run: npm run dev --workspace @f-commerce/backend > backend.log 2>&1 &
+      - name: Start invite worker
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/f-commerce
+          REDIS_URL: redis://127.0.0.1:6379
+          APP_ORIGIN: http://localhost:3000
+        run: npm run dev:worker --workspace @f-commerce/backend > worker.log 2>&1 &
       - name: Wait for backend and database
         run: |
           for i in $(seq 1 60); do
@@ -67,11 +84,24 @@ jobs:
           done
           cat backend.log
           exit 1
+      - name: Wait for invite worker
+        run: |
+          for i in $(seq 1 30); do
+            if grep -q "Invitation worker is ready for jobs" worker.log 2>/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat worker.log
+          exit 1
       - name: Run Playwright tests
         run: cd frontend && npx playwright test
       - name: Show backend log
         if: always()
         run: cat backend.log || true
+      - name: Show worker log
+        if: always()
+        run: cat worker.log || true
       - run: npm run build
         env:
           API_ORIGIN: http://localhost:4000
