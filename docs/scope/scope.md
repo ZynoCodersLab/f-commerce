@@ -168,7 +168,7 @@ Finish the staff invite that spec 0003 AC-5 requires. `POST /api/auth/invite` al
 
 - [x] Design it (spec): `/architect team & staff invites`
       Spec [0009](../specs/0009-team-staff-invites/index.md)
-- [x] Build it: `/develop team & staff invites` (branch `feat/team-staff-invites`, [spec](../specs/0009-team-staff-invites/index.md))
+- [x] Build it: `/develop team & staff invites` (branch `feat/team-staff-invites`, [spec](../specs/0009-team-staff-invites/index.md), [verify](../specs/0009-team-staff-invites/verify.md))
   - [x] Data, contracts, and migration: invitations, membership status, case insensitive email, and legacy cleanup (AC-1, AC-5 to AC-8, AC-10, AC-14, AC-16, AC-18, AC-22)
   - [x] Thin invite path: team repository and service, active membership check, queue, worker, Resend, and public accept API (AC-1 to AC-4, AC-6 to AC-11, AC-14, AC-15, AC-17, AC-19, AC-20, AC-23, AC-24)
   - [x] Team and invite screens: member list, pending invites, invite dialog, copy link, poll, and accept states (AC-1, AC-5 to AC-9, AC-21)
