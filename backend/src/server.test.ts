@@ -2,9 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 
-function startServer(port: number, env: NodeJS.ProcessEnv = {}): ChildProcess {
+function startServer(port: number, env: NodeJS.ProcessEnv = {}, needsEmail = false): ChildProcess {
   return spawn(process.execPath, ['--import', 'tsx/esm', 'src/server.ts'], {
-    env: { ...process.env, PORT: String(port), ...env },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      // A production process refuses to start without these, so the test runs
+      // locally keep development settings unless a test asks otherwise.
+      NODE_ENV: needsEmail ? 'production' : 'test',
+      RESEND_API_KEY: 're_test_key',
+      EMAIL_FROM: 'F Commerce <team@example.com>',
+      ...env,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }

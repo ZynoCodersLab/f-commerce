@@ -19,7 +19,12 @@ import {
   products,
   users,
 } from '../../infrastructure/database/drizzle/schema.js';
-import { startPg, stopPg, resetDatabase } from '../../test-support/pg-test-database.js';
+import {
+  startPg,
+  stopPg,
+  resetDatabase,
+  seedMembership,
+} from '../../test-support/pg-test-database.js';
 import { DrizzleOrderRepository } from '../../infrastructure/database/drizzle/repositories/order.repository.js';
 import { runWithContext } from '../../infrastructure/database/drizzle/context.js';
 
@@ -163,6 +168,9 @@ async function seedFixtures(): Promise<void> {
   await seedBusiness(OTHER_BIZ);
   await seedUser(OWNER, 'Maya Owner');
   await seedUser(STAFF, 'Sam Staff');
+  await seedMembership(BIZ, OWNER, 'OWNER');
+  await seedMembership(BIZ, STAFF, 'STAFF');
+  await seedMembership(OTHER_BIZ, OUTSIDER, 'OWNER');
 
   const categoryId = await seedCategory(BIZ, 'Tops');
   const otherCategoryId = await seedCategory(OTHER_BIZ, 'Other tops');

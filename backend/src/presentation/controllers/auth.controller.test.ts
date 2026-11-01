@@ -5,7 +5,7 @@ import cookieParser from 'cookie-parser';
 import { authRouter } from './auth.controller.js';
 import { AuthService } from '../../application/services/auth.service.js';
 import { requireAuth } from '../middlewares/auth.middleware.js';
-import { DuplicateEmailError, UnauthorizedError, ConflictError } from '../../domain/errors.js';
+import { DuplicateEmailError, UnauthorizedError } from '../../domain/errors.js';
 
 vi.mock('../../application/services/auth.service.js');
 vi.mock('../middlewares/auth.middleware.js', () => ({
@@ -355,42 +355,6 @@ describe('Auth Controller', () => {
       expect(res.status).toBe(200);
       expect(res.body.user.id).toBe('1');
       expect(res.body.businesses).toHaveLength(1);
-    });
-  });
-
-  describe('POST /api/auth/invite', () => {
-    it('returns 200 on success', async () => {
-      vi.mocked(AuthService.prototype.inviteStaff).mockResolvedValueOnce(undefined);
-
-      const res = await request(app)
-        .post('/api/auth/invite')
-        .set('x-business-id', 'biz123')
-        .send({ email: 'new@staff.com', role: 'STAFF' });
-
-      expect(res.status).toBe(200);
-      expect(res.body).toEqual({ success: true, message: 'User invited successfully' });
-    });
-
-    it('returns 400 for invalid role', async () => {
-      const res = await request(app)
-        .post('/api/auth/invite')
-        .set('x-business-id', 'biz123')
-        .send({ email: 'new@staff.com', role: 'INVALID' });
-
-      expect(res.status).toBe(400);
-    });
-
-    it('returns 409 if already a member', async () => {
-      vi.mocked(AuthService.prototype.inviteStaff).mockRejectedValueOnce(
-        new ConflictError('User is already a member or invited to this business'),
-      );
-
-      const res = await request(app)
-        .post('/api/auth/invite')
-        .set('x-business-id', 'biz123')
-        .send({ email: 'existing@staff.com', role: 'STAFF' });
-
-      expect(res.status).toBe(409);
     });
   });
 });

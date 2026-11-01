@@ -62,6 +62,7 @@ import {
   startPg,
   stopPg,
   resetDatabase,
+  seedMembership,
   getTestPool,
 } from '../../test-support/pg-test-database.js';
 
@@ -75,7 +76,7 @@ const OTHER_BIZ = '00000000-0000-0000-0000-0000000000b2';
 const OWNER = '00000000-0000-0000-0000-0000000000c3';
 const STAFF = '00000000-0000-0000-0000-0000000000d4';
 const OUTSIDER = '00000000-0000-0000-0000-0000000000e5';
-const BROKEN_AUDIT_USER = 'not-a-uuid';
+const BROKEN_AUDIT_USER = '00000000-0000-0000-0000-0000000000f6';
 
 function tokenFor(
   userId: string,
@@ -240,6 +241,9 @@ describe('product and category routes against PostgreSQL', () => {
     await resetDatabase();
     await seedBusiness(BIZ);
     await seedBusiness(OTHER_BIZ);
+    await seedMembership(BIZ, OWNER, 'OWNER');
+    await seedMembership(BIZ, STAFF, 'STAFF');
+    await seedMembership(OTHER_BIZ, OUTSIDER, 'OWNER');
   });
 
   describe('categories (AC-3, AC-12, AC-13)', () => {
@@ -1351,6 +1355,13 @@ describe('product and category routes against PostgreSQL', () => {
       const categoryId = await createCategoryViaApi('Catalog');
       const created = await createProductViaApi(productBody(categoryId, { name: 'Audit Fail' }));
       const id: string = created.body.data.id;
+
+      // A membership whose user row is absent, so the audit write fails.
+      const pool = getTestPool();
+      await seedMembership(BIZ, BROKEN_AUDIT_USER, 'OWNER');
+      await pool.query('ALTER TABLE "business_members" DISABLE TRIGGER ALL');
+      await pool.query('DELETE FROM users WHERE id = $1', [BROKEN_AUDIT_USER]);
+      await pool.query('ALTER TABLE "business_members" ENABLE TRIGGER ALL');
 
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       try {

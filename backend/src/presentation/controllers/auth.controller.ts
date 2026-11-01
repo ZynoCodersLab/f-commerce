@@ -1,20 +1,10 @@
 import { CookieOptions, Request, Response, Router } from 'express';
 import { AuthService } from '../../application/services/auth.service.js';
-import { requireAuth, requireBusinessRole } from '../middlewares/auth.middleware.js';
+import { requireAuth } from '../middlewares/auth.middleware.js';
 import { config } from '../../infrastructure/config.js';
-import {
-  RegisterSchema,
-  LoginSchema,
-  OAuthLoginSchema,
-  InviteStaffSchema,
-} from '@f-commerce/contracts';
+import { RegisterSchema, LoginSchema, OAuthLoginSchema } from '@f-commerce/contracts';
 import { DrizzleAuthRepository } from '../../infrastructure/database/drizzle/repositories/auth.repository.js';
-import {
-  DuplicateEmailError,
-  UnauthorizedError,
-  ConflictError,
-  NotFoundError,
-} from '../../domain/errors.js';
+import { DuplicateEmailError, UnauthorizedError, NotFoundError } from '../../domain/errors.js';
 import { sendInternalError } from './internal-error.js';
 
 export const authRouter = Router();
@@ -39,33 +29,6 @@ const refreshCookieOptions: CookieOptions = {
 function setRefreshCookie(res: Response, refreshToken: string): void {
   res.cookie('refreshToken', refreshToken, refreshCookieOptions);
 }
-
-authRouter.post(
-  '/invite',
-  requireAuth,
-  requireBusinessRole(['OWNER']),
-  async (req: Request, res: Response) => {
-    try {
-      const parsed = InviteStaffSchema.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(400).json({ error: 'Invalid input', details: parsed.error.format() });
-        return;
-      }
-      const { email, role } = parsed.data;
-
-      const businessId = req.headers['x-business-id'] as string;
-      await authService.inviteStaff(email, role, businessId);
-
-      res.status(200).json({ success: true, message: 'User invited successfully' });
-    } catch (error) {
-      if (error instanceof ConflictError) {
-        res.status(409).json({ error: error.message });
-      } else {
-        sendInternalError(res, error);
-      }
-    }
-  },
-);
 
 authRouter.post('/register', async (req: Request, res: Response) => {
   try {

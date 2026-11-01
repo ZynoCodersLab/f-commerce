@@ -53,6 +53,10 @@ describe('rate limiter escape hatch', () => {
     vi.resetModules();
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('RATE_LIMIT_DISABLED', 'true');
+    // A production process refuses to start without email settings, and the
+    // limiter is loaded through the same config module.
+    vi.stubEnv('RESEND_API_KEY', 're_test_key');
+    vi.stubEnv('EMAIL_FROM', 'F Commerce <team@example.com>');
 
     const server = await startRegisterApp();
 

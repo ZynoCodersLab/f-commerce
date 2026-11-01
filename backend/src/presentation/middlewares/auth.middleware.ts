@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { config } from '../../infrastructure/config.js';
 import { runWithContext } from '../../infrastructure/database/drizzle/context.js';
+import { DrizzleAuthRepository } from '../../infrastructure/database/drizzle/repositories/auth.repository.js';
 
 interface JwtPayload {
   userId: string;
@@ -36,13 +37,18 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   }
 }
 
+/**
+ * Gate every business route on the membership stored in the database right
+ * now, not on the claims baked into a token that may be up to fifteen minutes
+ * old. A removed member, or a member whose role was just demoted, is stopped on
+ * the very next request. The token claim only decides which business the
+ * request is about; the row decides whether it is allowed.
+ */
 export function requireBusinessRole(allowedRoles: ('OWNER' | 'STAFF')[]) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    // The businessId could come from a header, a param, or a query string.
-    // For this design, let's assume it is passed in the headers as 'x-business-id'
-    const businessId = req.headers['x-business-id'] as string;
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const businessId = req.headers['x-business-id'];
 
-    if (!businessId) {
+    if (typeof businessId !== 'string' || businessId === '') {
       res
         .status(400)
         .json({ error: 'Missing x-business-id header', message: 'Missing x-business-id header' });
@@ -57,16 +63,32 @@ export function requireBusinessRole(allowedRoles: ('OWNER' | 'STAFF')[]) {
       return;
     }
 
-    const membership = user.memberships.find((m) => m.businessId === businessId);
-    if (!membership) {
+    let role: 'OWNER' | 'STAFF' | undefined;
+    try {
+      const repository = new DrizzleAuthRepository();
+      const member = (await repository.findBusinessMember(businessId, user.userId)) as {
+        role?: string;
+        status?: string;
+      } | null;
+      if (member?.status === 'ACTIVE') {
+        role = member.role === 'OWNER' ? 'OWNER' : 'STAFF';
+      }
+    } catch (error) {
+      // A database failure must not look like a permission decision, so it
+      // becomes a plain server error instead of a silent 403.
+      next(error);
+      return;
+    }
+
+    if (!role) {
       res.status(403).json({
-        error: 'You do not have access to this business',
+        error: 'BUSINESS_ACCESS_DENIED',
         message: 'You do not have access to this business',
       });
       return;
     }
 
-    if (!allowedRoles.includes(membership.role)) {
+    if (!allowedRoles.includes(role)) {
       res.status(403).json({
         error: 'Insufficient permissions',
         message: 'You do not have permission to perform this action',
@@ -75,7 +97,7 @@ export function requireBusinessRole(allowedRoles: ('OWNER' | 'STAFF')[]) {
     }
 
     // Set the tenant context carried through AsyncLocalStorage
-    runWithContext({ userId: user.userId, businessId, role: membership.role }, () => {
+    runWithContext({ userId: user.userId, businessId, role }, () => {
       next();
     });
   };
