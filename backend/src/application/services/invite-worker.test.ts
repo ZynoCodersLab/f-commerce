@@ -7,6 +7,8 @@ import type { Invitation } from '../../domain/entities/invitation.entity.js';
 import type { User } from '../../domain/entities/user.entity.js';
 import { hashInviteToken } from '../../domain/invitation-token.js';
 
+// Covers AC-3, AC-12, and AC-20 in the worker job handler.
+
 const NOW = new Date('2026-03-01T09:00:00.000Z');
 const DAY = 24 * 60 * 60 * 1000;
 const TOKEN = 'raw-invite-token';
@@ -32,7 +34,13 @@ function invitation(overrides: Partial<Invitation> = {}): Invitation {
 }
 
 function setup(
-  overrides: { invitation?: Invitation | null; sendOk?: boolean; sendError?: string } = {},
+  overrides: {
+    invitation?: Invitation | null;
+    sendOk?: boolean;
+    sendError?: string;
+    emailReplyTo?: string;
+    memberAlreadyExists?: boolean;
+  } = {},
 ) {
   const teamRepository = {
     findInvitationByTokenHash: vi.fn(async () => {
@@ -41,6 +49,19 @@ function setup(
         ? { invitation: row, businessName: 'Maya Threads', inviterName: 'Maya Owner' }
         : null;
     }),
+    findMemberByEmail: vi.fn(async () =>
+      overrides.memberAlreadyExists
+        ? {
+            membershipId: 'membership-1',
+            userId: 'user-invitee',
+            name: 'Sam Staff',
+            email: 'sam@example.com',
+            role: 'STAFF' as const,
+            joinedAt: NOW,
+          }
+        : null,
+    ),
+    revokeInvitation: vi.fn(async () => true),
     markEmailSent: vi.fn(async () => true),
     markEmailFailed: vi.fn(async () => true),
     setEmailAttempts: vi.fn(async () => undefined),
@@ -65,8 +86,8 @@ function setup(
     teamRepository: teamRepository as unknown as ITeamRepository,
     authRepository: authRepository as unknown as IAuthRepository,
     send: send as unknown as InviteWorkerDeps['send'],
-    businessName: async () => 'Maya Threads',
-    appOrigin: 'https://shop.example.com',
+    emailReplyTo: overrides.emailReplyTo,
+    buildInviteUrl: (token) => `https://shop.example.com/invite/${token}`,
     now: () => NOW,
   };
 
@@ -97,7 +118,7 @@ describe('processing an invitation email', () => {
       replyTo: 'maya@example.com',
     });
     expect(idempotencyKey).toBe(`invite:invitation-1:${TOKEN_HASH}`);
-    expect(teamRepository.setEmailAttempts).toHaveBeenCalledWith('invitation-1', 1);
+    expect(teamRepository.setEmailAttempts).toHaveBeenCalledWith('invitation-1', TOKEN_HASH, 1);
     expect(teamRepository.markEmailSent).toHaveBeenCalledWith('invitation-1', TOKEN_HASH);
   });
 
@@ -144,6 +165,27 @@ describe('processing an invitation email', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('revokes the invitation and stays quiet when the address is already a member', async () => {
+    const { deps, teamRepository, send } = setup({ memberAlreadyExists: true });
+
+    const outcome = await processInviteEmailJob(deps, job, 1);
+
+    expect(outcome).toEqual({ outcome: 'IGNORED', reason: 'ALREADY_MEMBER' });
+    expect(send).not.toHaveBeenCalled();
+    expect(teamRepository.revokeInvitation).toHaveBeenCalledWith('business-1', 'invitation-1', {
+      userId: 'user-owner',
+    });
+  });
+
+  it('ignores an invitation whose email already failed', async () => {
+    const { deps, send } = setup({ invitation: invitation({ emailStatus: 'FAILED' }) });
+
+    const outcome = await processInviteEmailJob(deps, job, 1);
+
+    expect(outcome).toEqual({ outcome: 'IGNORED', reason: 'EMAIL_NOT_QUEUED' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('records an expired invitation as failed without sending', async () => {
     const { deps, teamRepository, send } = setup({
       invitation: invitation({ expiresAt: new Date(NOW.getTime() - 1000) }),
@@ -166,8 +208,32 @@ describe('processing an invitation email', () => {
     const outcome = await processInviteEmailJob(deps, job, 2);
 
     expect(outcome).toEqual({ outcome: 'RETRY', reason: 'PROVIDER_RATE_LIMITED' });
-    expect(teamRepository.setEmailAttempts).toHaveBeenCalledWith('invitation-1', 2);
+    expect(teamRepository.setEmailAttempts).toHaveBeenCalledWith('invitation-1', TOKEN_HASH, 2);
     expect(teamRepository.markEmailFailed).not.toHaveBeenCalled();
+  });
+
+  it('uses the configured reply address when one is set', async () => {
+    const { deps, send } = setup({ emailReplyTo: 'team@shop.example.com' });
+
+    await processInviteEmailJob(deps, job, 1);
+
+    const [content] = send.mock.calls[0] as unknown as [Record<string, unknown>, string];
+    expect(content.replyTo).toBe('team@shop.example.com');
+  });
+
+  it('fails immediately on a permanent provider error even with attempts left', async () => {
+    for (const sendError of ['PROVIDER_UNAUTHORIZED', 'EMAIL_NOT_CONFIGURED']) {
+      const { deps, teamRepository } = setup({ sendOk: false, sendError });
+
+      const outcome = await processInviteEmailJob(deps, job, 1);
+
+      expect(outcome).toEqual({ outcome: 'FAILED', reason: sendError });
+      expect(teamRepository.markEmailFailed).toHaveBeenCalledWith(
+        'invitation-1',
+        TOKEN_HASH,
+        sendError,
+      );
+    }
   });
 
   it('marks the invitation failed once every attempt is used', async () => {
@@ -181,5 +247,25 @@ describe('processing an invitation email', () => {
       TOKEN_HASH,
       'PROVIDER_REJECTED',
     );
+  });
+
+  it('records a failure when an unexpected error ends the last attempt', async () => {
+    const { deps, teamRepository, send } = setup();
+    send.mockRejectedValueOnce(new Error('provider client crashed'));
+
+    await expect(processInviteEmailJob(deps, job, 4)).rejects.toThrow('provider client crashed');
+    expect(teamRepository.markEmailFailed).toHaveBeenCalledWith(
+      'invitation-1',
+      TOKEN_HASH,
+      'EMAIL_SEND_FAILED',
+    );
+  });
+
+  it('leaves the row queued when an unexpected error still has attempts left', async () => {
+    const { deps, teamRepository, send } = setup();
+    send.mockRejectedValueOnce(new Error('temporary client crash'));
+
+    await expect(processInviteEmailJob(deps, job, 2)).rejects.toThrow('temporary client crash');
+    expect(teamRepository.markEmailFailed).not.toHaveBeenCalled();
   });
 });

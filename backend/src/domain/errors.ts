@@ -227,6 +227,18 @@ export class InviteAlreadyAcceptedError extends ConflictError {
   }
 }
 
+/**
+ * A resend lost a race with another resend of the same invitation: the link this
+ * call generated was never stored, so answering success would leak a dead link.
+ */
+export class InviteResendConflictError extends ConflictError {
+  constructor(
+    message: string = 'This invitation was just resent from somewhere else. Reload to see the newest link',
+  ) {
+    super(message);
+  }
+}
+
 export class InviteAlreadyMemberError extends ConflictError {
   constructor(message: string = 'This person is already a member of this business') {
     super(message);
@@ -235,7 +247,8 @@ export class InviteAlreadyMemberError extends ConflictError {
 
 export class InviteAlreadyPendingError extends ConflictError {
   constructor(
-    public readonly invitationId: string,
+    /** Omitted when a concurrent invite won the index but cannot be re-read. */
+    public readonly invitationId?: string,
     message: string = 'An invitation for this email is already waiting to be accepted',
   ) {
     super(message);
@@ -268,12 +281,6 @@ export class SelfChangeNotAllowedError extends ConflictError {
 
 export class TeamMemberNotFoundError extends NotFoundError {
   constructor(message: string = 'This team member could not be found') {
-    super(message);
-  }
-}
-
-export class BusinessAccessDeniedError extends DomainError {
-  constructor(message: string = 'You do not have access to this business') {
     super(message);
   }
 }

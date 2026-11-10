@@ -1,6 +1,5 @@
 import { Request, Response, Router } from 'express';
 import jwt from 'jsonwebtoken';
-import { CookieOptions } from 'express';
 import {
   InviteAcceptSchema,
   InviteCreateSchema,
@@ -12,15 +11,19 @@ import { AuthService } from '../../application/services/auth.service.js';
 import { requireAuth, requireBusinessRole } from '../middlewares/auth.middleware.js';
 import {
   inviteAcceptRateLimiter,
+  inviteAcceptTokenRateLimiter,
   invitePreviewRateLimiter,
+  invitePreviewTokenRateLimiter,
   inviteWriteRateLimiter,
 } from '../middlewares/invite-rate-limit.middleware.js';
 import { DrizzleTeamRepository } from '../../infrastructure/database/drizzle/repositories/team.repository.js';
 import { DrizzleAuthRepository } from '../../infrastructure/database/drizzle/repositories/auth.repository.js';
 import { enqueueInviteEmail } from '../../infrastructure/queue/invite-queue.js';
+import { isEmailConfigured } from '../../infrastructure/services/resend-email.service.js';
 import { config } from '../../infrastructure/config.js';
 import { requestContext } from '../../infrastructure/database/drizzle/context.js';
 import { sendInternalError } from './internal-error.js';
+import { setRefreshCookie } from './refresh-cookie.js';
 import {
   ConflictError,
   DomainError,
@@ -35,23 +38,13 @@ import {
 export const teamRouter = Router();
 export const invitationRouter = Router();
 
-/**
- * Same cookie rules as signing in: host only, strict, and secure in production.
- * The accept page reaches the API through the frontend proxy, so the cookie
- * stays first party.
- */
-const refreshCookieOptions: CookieOptions = {
-  httpOnly: true,
-  secure: config.NODE_ENV === 'production',
-  sameSite: 'strict',
-};
-
 const teamRepository = new DrizzleTeamRepository();
 const authRepository = new DrizzleAuthRepository();
 const teamService = new TeamService(
   teamRepository,
   authRepository,
   { enqueue: (data) => enqueueInviteEmail(data) },
+  { isConfigured: isEmailConfigured },
   new AuthService(authRepository),
   config.APP_ORIGIN,
 );
@@ -103,8 +96,13 @@ function sendError(res: Response, error: unknown): void {
   }
   if (error instanceof ConflictError) {
     // The conflict subclasses are each mapped by their own class name below;
-    // this is the fallback for a plain conflict such as a last owner error.
+    // an unmapped conflict is a programming mistake, so report it as one
+    // instead of mislabelling it as a validation failure.
     const code = conflictCode(error);
+    if (!code) {
+      sendInternalError(res, error);
+      return;
+    }
     res.status(409).json({ error: code, message: error.message });
     return;
   }
@@ -134,7 +132,7 @@ function sendError(res: Response, error: unknown): void {
 function domainStatus(name: string): { status: number; code: string } | null {
   switch (name) {
     case 'TeamMemberNotFoundError':
-      return { status: 404, code: 'MEMBER_NOT_FOUND' };
+      return { status: 404, code: TeamErrorCode.MEMBER_NOT_FOUND };
     case 'SignInRequiredError':
       return { status: 401, code: TeamErrorCode.SIGN_IN_REQUIRED };
     case 'EmailMismatchError':
@@ -147,10 +145,12 @@ function domainStatus(name: string): { status: number; code: string } | null {
 }
 
 /** Conflict subclasses carry their contract code in the class name. */
-function conflictCode(error: ConflictError): string {
+function conflictCode(error: ConflictError): string | null {
   switch (error.name) {
     case 'InviteAlreadyMemberError':
       return TeamErrorCode.INVITE_ALREADY_MEMBER;
+    case 'InviteResendConflictError':
+      return TeamErrorCode.INVITE_RESEND_CONFLICT;
     case 'InviteAlreadyAcceptedError':
       return TeamErrorCode.INVITE_ALREADY_ACCEPTED;
     case 'LastOwnerError':
@@ -158,7 +158,7 @@ function conflictCode(error: ConflictError): string {
     case 'SelfChangeNotAllowedError':
       return TeamErrorCode.SELF_CHANGE_NOT_ALLOWED;
     default:
-      return TeamErrorCode.VALIDATION_ERROR;
+      return null;
   }
 }
 
@@ -189,6 +189,7 @@ teamRouter.post(
       setLinkHeaders(res);
       res.status(201).json({ success: true, data: result, message: 'Invitation created' });
     } catch (error) {
+      setLinkHeaders(res);
       sendError(res, error);
     }
   },
@@ -205,6 +206,7 @@ teamRouter.post(
       setLinkHeaders(res);
       res.status(200).json({ success: true, data: result, message: 'Invitation resent' });
     } catch (error) {
+      setLinkHeaders(res);
       sendError(res, error);
     }
   },
@@ -280,19 +282,25 @@ function optionalUserId(req: Request): string | undefined {
   }
 }
 
-invitationRouter.get('/:token', invitePreviewRateLimiter, async (req: Request, res: Response) => {
-  try {
-    const data = await teamService.preview(String(req.params.token));
-    setLinkHeaders(res);
-    res.status(200).json({ success: true, data, message: 'Invitation loaded' });
-  } catch (error) {
-    setLinkHeaders(res);
-    sendError(res, error);
-  }
-});
+invitationRouter.get(
+  '/:token',
+  invitePreviewTokenRateLimiter,
+  invitePreviewRateLimiter,
+  async (req: Request, res: Response) => {
+    try {
+      const data = await teamService.preview(String(req.params.token));
+      setLinkHeaders(res);
+      res.status(200).json({ success: true, data, message: 'Invitation loaded' });
+    } catch (error) {
+      setLinkHeaders(res);
+      sendError(res, error);
+    }
+  },
+);
 
 invitationRouter.post(
   '/:token/accept',
+  inviteAcceptTokenRateLimiter,
   inviteAcceptRateLimiter,
   async (req: Request, res: Response) => {
     try {
@@ -306,7 +314,7 @@ invitationRouter.post(
         optionalUserId(req),
       );
 
-      res.cookie('refreshToken', result.refreshToken, refreshCookieOptions);
+      setRefreshCookie(res, result.refreshToken);
       setLinkHeaders(res);
       res.status(200).json({
         success: true,

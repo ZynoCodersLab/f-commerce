@@ -4,9 +4,11 @@ import {
   buildInviteSubject,
   buildInviteText,
   formatExpiry,
-  inviteUrlFor,
 } from './invite-email.js';
 import { sanitiseEmailError } from './resend-email.service.js';
+
+// Covers AC-3: the invitation email names the business, the inviter, the role,
+// the accept link, and the expiry, and a provider error is sanitised.
 
 const content = {
   to: 'sam@example.com',
@@ -51,15 +53,6 @@ describe('invitation email', () => {
 
   it('renders the expiry as a UTC date and time', () => {
     expect(formatExpiry(content.expiresAt)).toBe('8 November 2026 at 14:05 UTC');
-  });
-
-  it('builds the invite link from the app origin without doubling a slash', () => {
-    expect(inviteUrlFor('https://shop.example.com', 'abc')).toBe(
-      'https://shop.example.com/invite/abc',
-    );
-    expect(inviteUrlFor('https://shop.example.com/', 'abc')).toBe(
-      'https://shop.example.com/invite/abc',
-    );
   });
 });
 

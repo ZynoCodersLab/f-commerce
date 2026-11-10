@@ -22,6 +22,11 @@ export function hashesMatch(expected: string, actual: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+/** The one place an invite link is built, so every sender uses the same shape. */
+export function buildInviteUrl(appOrigin: string, token: string): string {
+  return `${appOrigin.replace(/\/+$/, '')}/invite/${token}`;
+}
+
 /** Invitations live seven days from creation or from the last resend (AC-1, AC-12). */
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 

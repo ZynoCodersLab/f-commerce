@@ -3,10 +3,21 @@ import jwt from 'jsonwebtoken';
 import { config } from '../../infrastructure/config.js';
 import { runWithContext } from '../../infrastructure/database/drizzle/context.js';
 import { DrizzleAuthRepository } from '../../infrastructure/database/drizzle/repositories/auth.repository.js';
+import { isUuid } from '../../domain/uuid.js';
 
 interface JwtPayload {
   userId: string;
   memberships: { businessId: string; role: 'OWNER' | 'STAFF' }[];
+}
+
+/**
+ * One repository for the process. It holds no per-request state, so the tenant
+ * scope comes from the arguments and the request context, not the instance.
+ */
+let authRepository: DrizzleAuthRepository | null = null;
+
+function getAuthRepository(): DrizzleAuthRepository {
+  return (authRepository ??= new DrizzleAuthRepository());
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -55,6 +66,15 @@ export function requireBusinessRole(allowedRoles: ('OWNER' | 'STAFF')[]) {
       return;
     }
 
+    // The header is compared against a uuid column, so a malformed value must
+    // fail here instead of reaching Postgres as a 22P02 and returning a 500.
+    if (!isUuid(businessId)) {
+      res
+        .status(400)
+        .json({ error: 'Invalid x-business-id header', message: 'Invalid x-business-id header' });
+      return;
+    }
+
     const user = req.user;
     if (!user) {
       res
@@ -65,8 +85,7 @@ export function requireBusinessRole(allowedRoles: ('OWNER' | 'STAFF')[]) {
 
     let role: 'OWNER' | 'STAFF' | undefined;
     try {
-      const repository = new DrizzleAuthRepository();
-      const member = (await repository.findBusinessMember(businessId, user.userId)) as {
+      const member = (await getAuthRepository().findBusinessMember(businessId, user.userId)) as {
         role?: string;
         status?: string;
       } | null;

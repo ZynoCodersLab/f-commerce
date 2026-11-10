@@ -52,12 +52,18 @@ describe('AuthService', () => {
       mockAuthRepository.createBusinessMember.mockResolvedValueOnce(undefined);
       mockAuthRepository.createRefreshToken.mockResolvedValueOnce(undefined);
       mockAuthRepository.findUserBusinesses.mockResolvedValueOnce([
-        { businessId: { _id: 'biz1' }, role: 'OWNER' },
+        { businessId: { _id: 'biz1' }, role: 'OWNER', status: 'ACTIVE' },
       ]);
       vi.mocked(jwt.sign).mockReturnValue('access_token' as unknown as void);
 
-      const result = await authService.register('test@test.com', 'pass', 'Test User', 'Test Biz');
+      const result = await authService.register(
+        '  Test@TEST.com  ',
+        'pass',
+        'Test User',
+        'Test Biz',
+      );
 
+      expect(mockAuthRepository.findUserByEmail).toHaveBeenCalledWith('test@test.com');
       expect(mockAuthRepository.createUser).toHaveBeenCalledWith(
         expect.objectContaining({ email: 'test@test.com' }),
       );
@@ -68,12 +74,29 @@ describe('AuthService', () => {
       expect(result.accessToken).toBe('access_token');
       expect(result.refreshToken).toBeDefined();
     });
+
+    it('turns a duplicate lower email unique violation into a conflict', async () => {
+      mockAuthRepository.findUserByEmail.mockResolvedValueOnce(null);
+      vi.mocked(bcrypt.genSalt).mockResolvedValueOnce('salt' as never);
+      vi.mocked(bcrypt.hash).mockResolvedValueOnce('hashed_pass' as never);
+      const violation = Object.assign(new Error('duplicate key value violates unique constraint'), {
+        code: '23505',
+      });
+      mockAuthRepository.createUser.mockRejectedValueOnce(violation);
+
+      await expect(
+        authService.register('dup@example.com', 'pass', 'Dup User', 'Dup Biz'),
+      ).rejects.toThrow(DuplicateEmailError);
+    });
   });
 
   describe('login', () => {
-    it('throws error for invalid email', async () => {
+    it('normalizes the email before lookup', async () => {
       mockAuthRepository.findUserByEmail.mockResolvedValueOnce(null);
-      await expect(authService.login('test@test.com', 'pass')).rejects.toThrow(UnauthorizedError);
+      await expect(authService.login('  Test@TEST.com  ', 'pass')).rejects.toThrow(
+        UnauthorizedError,
+      );
+      expect(mockAuthRepository.findUserByEmail).toHaveBeenCalledWith('test@test.com');
     });
 
     it('throws error for invalid password', async () => {
@@ -93,7 +116,7 @@ describe('AuthService', () => {
       } as User);
       vi.mocked(bcrypt.compare).mockResolvedValueOnce(true as never);
       mockAuthRepository.findUserBusinesses.mockResolvedValueOnce([
-        { businessId: 'biz1', role: 'OWNER' },
+        { businessId: 'biz1', role: 'OWNER', status: 'ACTIVE' },
       ]);
       mockAuthRepository.createRefreshToken.mockResolvedValueOnce(undefined);
       vi.mocked(jwt.sign).mockReturnValue('access_token' as unknown as void);
@@ -102,6 +125,29 @@ describe('AuthService', () => {
 
       expect(result.accessToken).toBe('access_token');
       expect(result.refreshToken).toBeDefined();
+    });
+  });
+
+  describe('issueTokensForUser', () => {
+    it('puts the preferred business first and keeps the other memberships in order', async () => {
+      mockAuthRepository.findUserBusinesses.mockResolvedValueOnce([
+        { businessId: 'biz-a', role: 'STAFF', status: 'ACTIVE' },
+        { businessId: 'biz-b', role: 'OWNER', status: 'ACTIVE' },
+        { businessId: 'biz-c', role: 'STAFF', status: 'ACTIVE' },
+      ]);
+      mockAuthRepository.createRefreshToken.mockResolvedValueOnce(undefined);
+      vi.mocked(jwt.sign).mockReturnValue('access_token' as unknown as void);
+
+      await authService.issueTokensForUser('user-1', 'biz-b');
+
+      const payload = vi.mocked(jwt.sign).mock.calls[0][0] as {
+        memberships: { businessId: string }[];
+      };
+      expect(payload.memberships.map((membership) => membership.businessId)).toEqual([
+        'biz-b',
+        'biz-a',
+        'biz-c',
+      ]);
     });
   });
 
@@ -171,6 +217,33 @@ describe('AuthService', () => {
       expect(mockAuthRepository.revokeRefreshToken).toHaveBeenCalledWith('token');
       expect(result.accessToken).toBe('access_token');
     });
+
+    // covers AC-17: the refresh handler rebuilds the claim list through the
+    // ACTIVE filter, so a removed membership never reappears in a token.
+    it('rebuilds tokens with only ACTIVE memberships', async () => {
+      const validDate = new Date();
+      validDate.setDate(validDate.getDate() + 1);
+      mockAuthRepository.findRefreshToken.mockResolvedValueOnce({
+        userId: 'u1',
+        revoked: false,
+        expiresAt: validDate,
+      });
+      mockAuthRepository.findUserById.mockResolvedValueOnce({ id: 'u1', isActive: true } as User);
+      mockAuthRepository.revokeRefreshToken.mockResolvedValueOnce(undefined);
+      mockAuthRepository.findUserBusinesses.mockResolvedValueOnce([
+        { businessId: 'biz1', role: 'OWNER', status: 'ACTIVE' },
+        { businessId: 'biz2', role: 'STAFF', status: 'REMOVED' },
+      ]);
+      vi.mocked(jwt.sign).mockReturnValue('access_token' as unknown as void);
+
+      await authService.refresh('token');
+
+      expect(jwt.sign).toHaveBeenCalledWith(
+        { userId: 'u1', memberships: [{ businessId: 'biz1', role: 'OWNER' }] },
+        expect.anything(),
+        expect.anything(),
+      );
+    });
   });
 
   describe('logout', () => {
@@ -182,14 +255,17 @@ describe('AuthService', () => {
   });
 
   describe('getProfile', () => {
-    it('returns user and businesses', async () => {
+    it('returns the user and only active businesses', async () => {
       mockAuthRepository.findUserById.mockResolvedValueOnce({
         id: 'u1',
         email: 'e',
         name: 'n',
         isActive: true,
       } as User);
-      mockAuthRepository.findUserBusinesses.mockResolvedValueOnce([{ businessId: 'b1' }]);
+      mockAuthRepository.findUserBusinesses.mockResolvedValueOnce([
+        { businessId: 'b1', status: 'ACTIVE' },
+        { businessId: 'b2', status: 'REMOVED' },
+      ]);
 
       const result = await authService.getProfile('u1');
 

@@ -16,6 +16,7 @@ import { categoryRouter } from './presentation/controllers/category.controller.j
 import { productRouter } from './presentation/controllers/product.controller.js';
 import { invitationRouter, teamRouter } from './presentation/controllers/team.controller.js';
 import { closeInviteQueue } from './infrastructure/queue/invite-queue.js';
+import { handleUnhandledError } from './presentation/middlewares/error-handler.middleware.js';
 import { closeRateLimitStore } from './presentation/middlewares/invite-rate-limit.middleware.js';
 import {
   globalRateLimiter,
@@ -68,6 +69,10 @@ app.get('/health', (_request, response) => {
     message: 'Backend is healthy',
   });
 });
+
+// Registered after every route so a failure a middleware forwards with
+// next(error) answers with the API's JSON envelope, not Express's default page.
+app.use(handleUnhandledError);
 
 /** Stop accepting connections and close the pool when the host stops the process. */
 function installShutdownHandlers(server: Server): void {

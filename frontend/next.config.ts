@@ -124,11 +124,15 @@ export const nextConfig: NextConfig = {
         headers: buildSecurityHeaders({ development: isDevelopment, production: isProduction }),
       },
       {
-        // An invite link carries a secret in its path. Keep it out of Referer
-        // headers sent to other sites and out of search indexes.
+        // An invite link carries a secret in its path, so keep it out of search
+        // indexes, out of shared caches, and never leak it through a referrer,
+        // not even the origin. Next applies matching rules in order and a later
+        // rule's value replaces an earlier one for the same header key, so this
+        // no-referrer overrides the global strict-origin-when-cross-origin.
         source: '/invite/:path*',
         headers: [
           { key: 'Referrer-Policy', value: 'no-referrer' },
+          { key: 'Cache-Control', value: 'no-store' },
           { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
         ],
       },

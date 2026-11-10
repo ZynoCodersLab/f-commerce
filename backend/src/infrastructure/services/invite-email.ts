@@ -101,7 +101,3 @@ export function buildInviteHtml(content: InviteEmailContent): string {
   </body>
 </html>`;
 }
-
-export function inviteUrlFor(appOrigin: string, token: string): string {
-  return `${appOrigin.replace(/\/+$/, '')}/invite/${token}`;
-}

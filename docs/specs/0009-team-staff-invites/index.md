@@ -290,7 +290,7 @@ Error codes:
 
 - Happy path: an owner invites a new email, the row is created, the copy link opens the invite page, the worker marks the email `SENT`, the invitee sets a name and password, the membership becomes `ACTIVE`, and the dashboard opens with the invited business. Verifies **AC-1**, **AC-3**, **AC-7**, **AC-17**.
 - Queue failure: Redis is stopped, the invite is still created with `FAILED` and `QUEUE_UNAVAILABLE`, and the copy link works. Verifies **AC-4**.
-- Provider failure: the provider fails on the initial attempt and all three retries, at roughly 1, 2, and 4 minutes, the row becomes `FAILED`, and Resend recovers it. Verifies **AC-3**, **AC-12**.
+- Provider failure: a transient provider error fails on the initial attempt and all three retries, at roughly 1, 2, and 4 minutes, the row becomes `FAILED`, and Resend recovers it. A permanent error such as `PROVIDER_UNAUTHORIZED` ends the job on the first attempt by design. Verifies **AC-3**, **AC-12**.
 - Expired while queued: an invite expires while its email is still queued. The worker marks the row `FAILED` with `INVITE_EXPIRED`, and the team screen offers Resend. Verifies **AC-3**, **AC-4**.
 - Permission: a staff member can read the team list but gets 403 on every write, and an unauthenticated caller gets 401. Verifies **AC-2**, **AC-5**.
 - Existing account: sign in as the invited email, accept, and land on the dashboard. A wrong signed in user gets 403, and an account with no password can set one. Verifies **AC-8**, **AC-9**.
@@ -354,6 +354,8 @@ The project uses Tracer Bullet. The first slice stands up one thin invite path t
 - The worker job carries a raw token in Redis while it is active.
 - Bounce and complaint webhooks are not handled in this slice.
 - There is no seat cap or plan enforcement.
+- Permanent provider errors (a missing sender or an unauthorized key) end the job on the first attempt instead of the full retry schedule, because waiting cannot fix a misconfiguration. The row still becomes `FAILED` with a sanitized code.
+- Accept commits the membership before it issues session tokens. A crash in that gap leaves the invitation consumed and the invitee signs in with the password they just set; a blind retry answers 409 `INVITE_ALREADY_ACCEPTED`.
 
 **Neutral**:
 
@@ -363,6 +365,7 @@ The project uses Tracer Bullet. The first slice stands up one thin invite path t
 - CI gains Redis and the worker.
 - The old `POST /api/auth/invite` route is removed.
 - The migration deletes legacy `INVITED` rows and placeholder users.
+- A create that loses the race to an accept leaves a `TEAM_INVITE_CREATED` and `TEAM_INVITE_REVOKED` audit pair for an invitation that is never shown. The pair records what happened.
 
 ## Migration plan
 

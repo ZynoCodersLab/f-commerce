@@ -53,8 +53,9 @@ describe('rate limiter escape hatch', () => {
     vi.resetModules();
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('RATE_LIMIT_DISABLED', 'true');
-    // A production process refuses to start without email settings, and the
-    // limiter is loaded through the same config module.
+    // A production process refuses to start without email settings and a real
+    // invite origin, and the limiter is loaded through the same config module.
+    vi.stubEnv('APP_ORIGIN', 'https://shop.example.com');
     vi.stubEnv('RESEND_API_KEY', 're_test_key');
     vi.stubEnv('EMAIL_FROM', 'F Commerce <team@example.com>');
 

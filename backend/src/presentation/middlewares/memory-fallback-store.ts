@@ -55,10 +55,6 @@ export class MemoryFallbackStore implements Store {
     this.buckets.clear();
   }
 
-  init0(): void {
-    // Nothing to schedule; expired buckets are dropped on the next increment.
-  }
-
   private sweep(now: number): void {
     if (this.buckets.size < 1_000) return;
     for (const [key, bucket] of this.buckets) {

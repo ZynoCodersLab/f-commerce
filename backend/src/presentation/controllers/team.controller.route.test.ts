@@ -21,6 +21,9 @@ import {
 import { hashInviteToken } from '../../domain/invitation-token.js';
 import { and, eq } from 'drizzle-orm';
 
+// Covers AC-1, AC-2, AC-5, AC-6, AC-7, AC-8, AC-10, AC-11, AC-12, AC-13,
+// AC-14, AC-15, AC-17, and AC-20 through the real Express routes.
+
 const BIZ = '00000000-0000-0000-0000-0000000000c1';
 const OTHER_BIZ = '00000000-0000-0000-0000-0000000000c2';
 const OWNER = '00000000-0000-0000-0000-0000000000d1';
@@ -38,7 +41,6 @@ beforeAll(async () => {
 });
 app.use('/api/team', teamRouter);
 app.use('/api/invitations', invitationRouter);
-
 function signIn(userId: string): string {
   return jwt.sign(
     { userId, memberships: [{ businessId: BIZ, role: 'OWNER' }] },
@@ -90,9 +92,14 @@ async function expiredInvitation(email: string, token = `expired-${email}`) {
   return rows[0].id;
 }
 
-beforeAll(async () => {
-  await startPg();
-});
+async function membershipIdFor(userId: string, businessId = BIZ): Promise<string> {
+  const rows = await getDb()
+    .select({ id: businessMembers.id })
+    .from(businessMembers)
+    .where(and(eq(businessMembers.businessId, businessId), eq(businessMembers.userId, userId)));
+  return rows[0].id;
+}
+
 afterAll(async () => {
   await stopPg();
 });
@@ -178,7 +185,55 @@ describe('GET /api/team', () => {
   });
 });
 
+describe('owner only management routes', () => {
+  it('answers 403 to a staff member on every management call', async () => {
+    const invitationId = await pendingInvitation('guarded@example.com');
+    const memberId = await membershipIdFor(STAFF);
+    const staffToken = signIn(STAFF);
+
+    const attempts = [
+      request(app).post('/api/team/invitations').send({ email: 'blocked@example.com' }),
+      request(app).post(`/api/team/invitations/${invitationId}/resend`),
+      request(app).delete(`/api/team/invitations/${invitationId}`),
+      request(app).patch(`/api/team/members/${memberId}`).send({ role: 'OWNER' }),
+      request(app).delete(`/api/team/members/${memberId}`),
+    ];
+
+    for (const attempt of attempts) {
+      const response = await attempt
+        .set('Authorization', `Bearer ${staffToken}`)
+        .set('x-business-id', BIZ);
+      expect(response.status).toBe(403);
+      expect(response.body.error).toBe('Insufficient permissions');
+    }
+  });
+
+  it('answers 401 without a token on every management call', async () => {
+    const invitationId = await pendingInvitation('unauthenticated@example.com');
+    const memberId = await membershipIdFor(STAFF);
+
+    const attempts = [
+      request(app).post('/api/team/invitations').send({ email: 'blocked@example.com' }),
+      request(app).post(`/api/team/invitations/${invitationId}/resend`),
+      request(app).delete(`/api/team/invitations/${invitationId}`),
+      request(app).patch(`/api/team/members/${memberId}`).send({ role: 'OWNER' }),
+      request(app).delete(`/api/team/members/${memberId}`),
+    ];
+
+    for (const attempt of attempts) {
+      const response = await attempt.set('x-business-id', BIZ);
+      expect(response.status).toBe(401);
+    }
+  });
+});
+
 describe('POST /api/team/invitations', () => {
+  beforeEach(() => {
+    // This block asserts the no-provider path. A developer .env that sets a
+    // Resend key must not change the result, so clear it for these tests.
+    config.RESEND_API_KEY = undefined;
+  });
+
   it('creates a pending invitation and returns the link once', async () => {
     const response = await request(app)
       .post('/api/team/invitations')
@@ -215,6 +270,10 @@ describe('POST /api/team/invitations', () => {
     expect(response.status).toBe(400);
     expect(response.body.error).toBe('VALIDATION_ERROR');
     expect(response.body.fields).toContain('email');
+    // A failed invite write still carries the link headers, like the success path.
+    expect(response.headers['referrer-policy']).toBe('no-referrer');
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['x-robots-tag']).toBe('noindex');
   });
 
   it('answers 403 to a staff member', async () => {
@@ -358,6 +417,18 @@ describe('member changes', () => {
     expect(response.body.error).toBe('SELF_CHANGE_NOT_ALLOWED');
   });
 
+  it('blocks removing your own membership', async () => {
+    const id = await membershipIdFor(OWNER);
+
+    const response = await request(app)
+      .delete(`/api/team/members/${id}`)
+      .set('Authorization', `Bearer ${signIn(OWNER)}`)
+      .set('x-business-id', BIZ);
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe('SELF_CHANGE_NOT_ALLOWED');
+  });
+
   it('removes a member and cuts their access right away', async () => {
     const id = await staffMembershipId();
 
@@ -463,9 +534,16 @@ describe('public invitation routes', () => {
     const signedIn = await request(app)
       .post('/api/invitations/sam-token/accept')
       .set('Authorization', `Bearer ${signIn(STAFF)}`)
-      .send({});
+      // A password in the body must be ignored: accepting is not a reset (AC-8).
+      .send({ password: 'attacker chosen password' });
     expect(signedIn.status).toBe(200);
     expect(signedIn.body.data.businessId).toBe(BIZ);
+
+    const stored = await getDb()
+      .select({ passwordHash: users.passwordHash })
+      .from(users)
+      .where(eq(users.id, STAFF));
+    expect(stored[0].passwordHash).toBe('hashed');
 
     const restore = await getDb()
       .select({ status: businessMembers.status })

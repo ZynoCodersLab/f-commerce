@@ -69,6 +69,10 @@ function problemFor(error: unknown): Problem {
 function formMode(preview: InvitePreview, signedInEmail: string | null) {
   if (preview.alreadyMember) return 'already-member' as const;
   const signedIn = signedInEmail !== null && signedInEmail === preview.email;
+  // A session for someone else cannot accept this invitation (the API answers
+  // EMAIL_MISMATCH), so ask them to sign out instead of offering a form that is
+  // guaranteed to fail.
+  if (signedInEmail !== null && !signedIn) return 'wrong-account' as const;
   if (preview.accountExists && preview.hasPassword) {
     return signedIn ? 'accept' : ('sign-in' as const);
   }
@@ -80,56 +84,58 @@ export default function InvitePage() {
   const rawToken = params?.token;
   const token = Array.isArray(rawToken) ? rawToken[0] : rawToken;
 
-  const ready = useRequireAuth({ requireAuth: false, redirectTo: mustStayOnInvite() });
+  // The invitation page serves signed in and signed out visitors alike. Read the
+  // session so the right form is shown, but never send an authenticated visitor
+  // away: the whole point of the link is to accept in place.
+  const ready = useRequireAuth({ requireAuth: false, redirectAuthenticated: false });
   const router = useRouter();
   const { timezone, mounted } = useBusinessSettings();
 
   const nameId = useId();
   const passwordId = useId();
+  const confirmPasswordId = useId();
   const [state, setState] = useState<PageState>('loading');
   const [preview, setPreview] = useState<InvitePreview | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [needsSignIn, setNeedsSignIn] = useState(false);
   const [missingPassword, setMissingPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const load = useCallback(async () => {
-    if (!token) return;
-    try {
-      const data = await fetchInvitePreview(token);
-      setPreview(data);
-      setSignedInEmail(await currentEmail());
-      setState('ready');
-    } catch (error) {
-      setProblem(problemFor(error));
-      setState('error');
-    }
-  }, [token]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
+  const load = useCallback(
+    async (isCancelled: () => boolean = () => false) => {
       if (!token) return;
       try {
         const data = await fetchInvitePreview(token);
-        if (cancelled) return;
+        if (isCancelled()) return;
         setPreview(data);
-        setSignedInEmail(await currentEmail());
+        const email = await currentEmail();
+        if (isCancelled()) return;
+        setSignedInEmail(email);
         setState('ready');
       } catch (error) {
-        if (cancelled) return;
+        if (isCancelled()) return;
         setProblem(problemFor(error));
         setState('error');
       }
-    })();
+    },
+    [token],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    // The state updates land after the fetch resolves, so this is not a render
+    // time setState even though the helper is called from the effect body.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [load]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -139,12 +145,13 @@ export default function InvitePage() {
     setMissingPassword(false);
 
     const mode = formMode(preview, signedInEmail);
+    // A signed in account accepts with its bearer token alone. Only a new
+    // account, or an account that has no password yet, sets one here.
     const body: { name?: string; password?: string } = {};
     if (mode === 'set-password') {
       if (name.trim()) body.name = name.trim();
       body.password = password;
     }
-    if (mode === 'accept' && password.trim()) body.password = password.trim();
 
     setSubmitting(true);
     try {
@@ -189,6 +196,7 @@ export default function InvitePage() {
     clearAuth();
     setSignedInEmail(null);
     setPassword('');
+    setConfirmPassword('');
     if (token) void load();
   }
 
@@ -224,7 +232,10 @@ export default function InvitePage() {
   }
 
   const mode = formMode(preview, signedInEmail);
-  const expires = mounted ? formatDateTime(preview.expiresAt, timezone) : '';
+  const expires = mounted ? formatDateTime(preview.expiresAt, preview.timezone ?? timezone) : '';
+  const passwordsMatch = password === confirmPassword;
+  const showPasswordMismatch =
+    mode === 'set-password' && confirmPassword.length > 0 && !passwordsMatch;
 
   return (
     <Shell>
@@ -256,7 +267,9 @@ export default function InvitePage() {
       {mode === 'already-member' && (
         <div className="mt-6 grid gap-4">
           <Alert variant="neutral">
-            You are already a member of {preview.businessName}. Sign in to open it.
+            This invitation is for <span className="font-semibold text-ink">{preview.email}</span>,
+            who is already a member of {preview.businessName}. Sign in with that account to open the
+            business.
           </Alert>
           <Button onClick={() => router.push('/login')}>Sign in</Button>
         </div>
@@ -268,6 +281,19 @@ export default function InvitePage() {
             This email already has an account. Sign in with it, then open this link again.
           </Alert>
           <Button onClick={() => router.push('/login')}>Sign in</Button>
+        </div>
+      )}
+
+      {mode === 'wrong-account' && (
+        <div className="mt-6 grid gap-4">
+          <Alert variant="neutral">
+            You are signed in as <span className="font-semibold text-ink">{signedInEmail}</span>,
+            but this invitation is for{' '}
+            <span className="font-semibold text-ink">{preview.email}</span>. Sign out to accept it.
+          </Alert>
+          <Button onClick={signOut} variant="secondary">
+            Sign out
+          </Button>
         </div>
       )}
 
@@ -308,23 +334,45 @@ export default function InvitePage() {
             </Field>
           )}
 
-          <Field
-            description="At least 8 characters."
-            error={missingPassword ? 'Use a password of at least 8 characters.' : undefined}
-            htmlFor={passwordId}
-            label="Password"
-          >
-            <Input
-              autoComplete="new-password"
-              id={passwordId}
-              minLength={8}
-              name="password"
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              type="password"
-              value={password}
-            />
-          </Field>
+          {mode === 'set-password' && (
+            <Field
+              description="At least 8 characters."
+              error={missingPassword ? 'Use a password of at least 8 characters.' : undefined}
+              htmlFor={passwordId}
+              label="Password"
+            >
+              <Input
+                autoComplete="new-password"
+                id={passwordId}
+                minLength={8}
+                name="password"
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                type="password"
+                value={password}
+              />
+            </Field>
+          )}
+
+          {mode === 'set-password' && (
+            <Field
+              description="Type the same password again."
+              error={showPasswordMismatch ? 'These passwords do not match.' : undefined}
+              htmlFor={confirmPasswordId}
+              label="Confirm password"
+            >
+              <Input
+                autoComplete="new-password"
+                id={confirmPasswordId}
+                minLength={8}
+                name="confirmPassword"
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                required
+                type="password"
+                value={confirmPassword}
+              />
+            </Field>
+          )}
 
           {formError && <FormMessage id="invite-error">{formError}</FormMessage>}
 
@@ -334,7 +382,12 @@ export default function InvitePage() {
             </Button>
           )}
 
-          <Button disabled={submitting || password.length < 8} type="submit">
+          <Button
+            disabled={
+              submitting || (mode === 'set-password' && (password.length < 8 || !passwordsMatch))
+            }
+            type="submit"
+          >
             {submitting ? 'Joining...' : `Join ${preview.businessName}`}
           </Button>
         </form>
@@ -346,11 +399,6 @@ export default function InvitePage() {
       </p>
     </Shell>
   );
-}
-
-/** The invite page keeps its place in front of a signed in visitor. */
-function mustStayOnInvite() {
-  return typeof window === 'undefined' ? '/dashboard' : window.location.pathname;
 }
 
 async function currentEmail(): Promise<string | null> {

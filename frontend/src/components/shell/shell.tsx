@@ -12,6 +12,7 @@ import {
   Settings,
   ShoppingBag,
   Users,
+  UsersRound,
 } from 'lucide-react';
 import NextLink from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -44,7 +45,7 @@ const routes: RouteItem[] = [
 
 const secondaryRoutes: RouteItem[] = [
   { href: '/settings', label: 'Settings', icon: Settings },
-  { href: '/settings/team', label: 'Team', icon: Users },
+  { href: '/settings/team', label: 'Team', icon: UsersRound },
 ];
 
 function isRouteActive(pathname: string, href: string) {

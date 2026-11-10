@@ -8,9 +8,10 @@ import { config } from '../config.js';
  * worker itself waits for the connection.
  *
  * @param role Labels the connection in logs and lets one process hold more
- *   than one (the producer and the worker use separate clients).
+ *   than one (the producer, the event stream, and the worker use separate
+ *   clients).
  */
-export function createRedisConnection(role: 'producer' | 'worker'): Redis {
+export function createRedisConnection(role: 'producer' | 'events' | 'worker'): Redis {
   const connection = new Redis(config.REDIS_URL, {
     maxRetriesPerRequest: null,
     enableReadyCheck: false,

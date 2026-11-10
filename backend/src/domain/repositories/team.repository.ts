@@ -23,6 +23,8 @@ export interface TeamInvitationRecord extends Invitation {
 export interface InvitationContext {
   invitation: Invitation;
   businessName: string;
+  /** The business's zone, so the invite page can render the expiry correctly. */
+  businessTimezone: string;
   inviterName: string;
 }
 
@@ -66,13 +68,19 @@ export interface ITeamRepository {
   /** A token lookup that includes accepted and revoked rows, so the caller can explain why. */
   findInvitationByTokenHash(tokenHash: string): Promise<InvitationContext | null>;
   createInvitation(data: NewInvitationData): Promise<Invitation>;
-  /** Replace the token and expiry of an existing invitation and queue a new send. */
+  /**
+   * Replace the token and expiry of an existing invitation and queue a new send.
+   * `expectedTokenHash` is the hash the caller read before rotating: the update
+   * only lands when the stored hash still equals it, so two resends racing one
+   * invitation cannot silently hand out a link that the other one overwrote.
+   */
   rotateInvitation(
     businessId: string,
     invitationId: string,
     tokenHash: string,
     expiresAt: Date,
     audit: { userId: string },
+    expectedTokenHash: string,
   ): Promise<Invitation | null>;
   revokeInvitation(
     businessId: string,
@@ -82,7 +90,7 @@ export interface ITeamRepository {
   markEmailSent(invitationId: string, tokenHash: string): Promise<boolean>;
   markEmailFailed(invitationId: string, tokenHash: string, reason: string): Promise<boolean>;
   markEmailSkipped(invitationId: string, tokenHash: string): Promise<boolean>;
-  setEmailAttempts(invitationId: string, attempts: number): Promise<void>;
+  setEmailAttempts(invitationId: string, tokenHash: string, attempts: number): Promise<void>;
   updateMemberRole(
     businessId: string,
     membershipId: string,
@@ -100,13 +108,18 @@ export interface ITeamRepository {
    */
   acceptInvitation(input: {
     invitationId: string;
-    email: string;
-    role: InvitationRole;
+    /** The hash the caller presented. The locked row rejects a stale link. */
+    tokenHash: string;
+    /** Fallback display name, normally the invitation address local part. */
     name: string;
+    /**
+     * A name supplied in the accept body when the caller is setting a password;
+     * it wins over the stored name. Ignored for a signed in caller who already
+     * has a password, because that flow only accepts the invitation.
+     */
+    requestedName?: string;
     passwordHash?: string;
     existingUserId?: string;
-    existingUserName?: string;
-    accountExists: boolean;
   }): Promise<AcceptResult>;
 }
 

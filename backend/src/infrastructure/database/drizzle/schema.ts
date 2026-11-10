@@ -37,6 +37,10 @@ export const users = pgTable(
   'users',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    // The original case sensitive unique constraint is kept for migration
+    // history. Identity is case insensitive now, enforced by the lower index
+    // below; the two constraints agree for every email that differs by more
+    // than letter case.
     email: text('email').notNull().unique(),
     passwordHash: text('password_hash'),
     name: text('name').notNull(),

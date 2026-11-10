@@ -7,6 +7,16 @@ import {
   buildInviteText,
 } from './invite-email.js';
 
+/** The sandbox sender a development machine uses when EMAIL_FROM is unset. */
+const DEFAULT_INVITE_FROM = 'F Commerce <onboarding@resend.dev>';
+
+/** One client for the process; the key is fixed at startup by the config gate. */
+let resendClient: Resend | null = null;
+
+function getResendClient(apiKey: string): Resend {
+  return (resendClient ??= new Resend(apiKey));
+}
+
 /** The provider is configured (or not) in one place, so the worker can skip cleanly. */
 export function isEmailConfigured(): boolean {
   return typeof config.RESEND_API_KEY === 'string' && config.RESEND_API_KEY.trim() !== '';
@@ -57,12 +67,12 @@ export async function sendInviteEmail(
   const apiKey = config.RESEND_API_KEY;
   if (!apiKey) return { ok: false, errorCode: 'EMAIL_NOT_CONFIGURED' };
 
-  const resend = new Resend(apiKey);
+  const resend = getResendClient(apiKey);
 
   try {
     const { error } = await resend.emails.send(
       {
-        from: config.EMAIL_FROM,
+        from: config.EMAIL_FROM ?? DEFAULT_INVITE_FROM,
         to: content.to,
         subject: buildInviteSubject(content),
         html: buildInviteHtml(content),

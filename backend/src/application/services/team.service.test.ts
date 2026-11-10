@@ -14,6 +14,7 @@ import {
   InviteAlreadyPendingError,
   InviteExpiredError,
   InviteNotFoundError,
+  InviteResendConflictError,
   InviteRevokedError,
   LastOwnerError,
   SelfChangeNotAllowedError,
@@ -25,12 +26,10 @@ import { hashInviteToken } from '../../domain/invitation-token.js';
 import type { User } from '../../domain/entities/user.entity.js';
 import { TeamService } from './team.service.js';
 
-vi.mock('bcrypt');
-vi.mock('../../infrastructure/services/resend-email.service.js', () => ({
-  isEmailConfigured: vi.fn(() => true),
-}));
+// Covers AC-1, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12,
+// AC-13, AC-14, AC-15, AC-18, and AC-20 at the service boundary.
 
-const { isEmailConfigured } = await import('../../infrastructure/services/resend-email.service.js');
+vi.mock('bcrypt');
 
 const BIZ = 'business-1';
 const OWNER = 'user-owner';
@@ -38,11 +37,13 @@ const INVITEE = 'user-invitee';
 const NOW = new Date('2026-03-01T09:00:00.000Z');
 const DAY = 24 * 60 * 60 * 1000;
 
-function uniqueViolation(): Error {
+function uniqueViolation(constraint?: string): Error {
   const error = new Error('duplicate key value violates unique constraint') as Error & {
     code: string;
+    constraint?: string;
   };
   error.code = '23505';
+  if (constraint) error.constraint = constraint;
   return error;
 }
 
@@ -105,6 +106,7 @@ interface Stubs {
   teamRepository: { [K in keyof ITeamRepository]: ReturnType<typeof vi.fn> };
   authRepository: { [K in keyof IAuthRepository]: ReturnType<typeof vi.fn> };
   emailQueue: { enqueue: ReturnType<typeof vi.fn> };
+  emailDelivery: { isConfigured: ReturnType<typeof vi.fn> };
   tokenIssuer: { issueTokensForUser: ReturnType<typeof vi.fn> };
   service: TeamService;
 }
@@ -121,14 +123,16 @@ function setup(): Stubs {
     findInvitationByTokenHash: vi.fn(async () => ({
       invitation: invitation(),
       businessName: 'Maya Threads',
+      businessTimezone: 'Asia/Dhaka',
       inviterName: 'Maya Owner',
     })),
     createInvitation: vi.fn(async (data: NewInvitationData) =>
       invitation({ tokenHash: data.tokenHash }),
     ),
-    rotateInvitation: vi.fn(async (_businessId: string, _id: string, tokenHash: string) =>
-      invitation({ tokenHash }),
-    ),
+    rotateInvitation: vi.fn(async (...args: string[]) => {
+      // args: [businessId, invitationId, tokenHash, expiresAt, audit, expectedTokenHash]
+      return invitation({ tokenHash: args[2] ?? 'stored-hash' });
+    }),
     revokeInvitation: vi.fn(async () => true),
     markEmailSent: vi.fn(async () => true),
     markEmailFailed: vi.fn(async () => true),
@@ -159,6 +163,7 @@ function setup(): Stubs {
   };
 
   const emailQueue = { enqueue: vi.fn(async () => true) };
+  const emailDelivery = { isConfigured: vi.fn(() => true) };
   const tokenIssuer = {
     issueTokensForUser: vi.fn(async () => ({ accessToken: 'access', refreshToken: 'refresh' })),
   };
@@ -167,17 +172,17 @@ function setup(): Stubs {
     teamRepository as unknown as ITeamRepository,
     authRepository as unknown as IAuthRepository,
     emailQueue,
+    emailDelivery,
     tokenIssuer,
     'https://shop.example.com/',
     () => NOW,
   );
 
-  return { teamRepository, authRepository, emailQueue, tokenIssuer, service };
+  return { teamRepository, authRepository, emailQueue, emailDelivery, tokenIssuer, service };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(isEmailConfigured).mockReturnValue(true);
 });
 
 describe('listing the team', () => {
@@ -204,6 +209,7 @@ describe('listing the team', () => {
     expect(result.invitations[0]).toMatchObject({
       invitedByName: 'Maya Owner',
       sentAt: null,
+      lastSentAt: invitation().lastSentAt.toISOString(),
       emailStatus: 'QUEUED',
       emailError: null,
     });
@@ -260,6 +266,20 @@ describe('creating an invitation', () => {
     expect(teamRepository.createInvitation).not.toHaveBeenCalled();
   });
 
+  it('undoes an invitation created while the same address was being accepted', async () => {
+    const { service, teamRepository, emailQueue } = setup();
+    teamRepository.findMemberByEmail.mockResolvedValueOnce(null).mockResolvedValueOnce(member());
+
+    await expect(service.invite(BIZ, OWNER, { email: 'sam@example.com' })).rejects.toBeInstanceOf(
+      InviteAlreadyMemberError,
+    );
+
+    expect(teamRepository.revokeInvitation).toHaveBeenCalledWith(BIZ, 'invitation-1', {
+      userId: OWNER,
+    });
+    expect(emailQueue.enqueue).not.toHaveBeenCalled();
+  });
+
   it('refuses a second live invitation and names the first', async () => {
     const { service, teamRepository } = setup();
     teamRepository.findLiveInvitationByEmail.mockResolvedValueOnce(invitation());
@@ -286,18 +306,26 @@ describe('creating an invitation', () => {
     expect(teamRepository.createInvitation).toHaveBeenCalled();
   });
 
-  it('turns a race on the live index into a pending conflict', async () => {
+  it('turns a race on the live index into a pending conflict that names the winner', async () => {
     const { service, teamRepository } = setup();
-    teamRepository.createInvitation.mockRejectedValueOnce(uniqueViolation());
-
-    await expect(service.invite(BIZ, OWNER, { email: 'sam@example.com' })).rejects.toBeInstanceOf(
-      InviteAlreadyPendingError,
+    teamRepository.createInvitation.mockRejectedValueOnce(
+      uniqueViolation('invitations_business_email_live_unq'),
     );
+    teamRepository.findLiveInvitationByEmail
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(invitation());
+
+    const failure = await service
+      .invite(BIZ, OWNER, { email: 'sam@example.com' })
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(InviteAlreadyPendingError);
+    expect((failure as InviteAlreadyPendingError).invitationId).toBe('invitation-1');
   });
 
   it('keeps the invitation and records a skipped email when no provider is configured', async () => {
-    const { service, teamRepository } = setup();
-    vi.mocked(isEmailConfigured).mockReturnValue(false);
+    const { service, teamRepository, emailDelivery } = setup();
+    emailDelivery.isConfigured.mockReturnValue(false);
 
     const result = await service.invite(BIZ, OWNER, { email: 'sam@example.com' });
 
@@ -337,6 +365,9 @@ describe('resending and cancelling', () => {
     expect(rotate?.[1]).toBe('invitation-1');
     expect(rotate?.[2]).toBe(hashInviteToken(token));
     expect((rotate?.[3] as Date).getTime()).toBe(NOW.getTime() + 7 * DAY);
+    // The rotate is guarded by the hash the service read (optimistic
+    // concurrency): a resend racing another resend cannot both win.
+    expect(rotate?.[5]).toBe('stored-hash');
     expect(emailQueue.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({ token, tokenHash: hashInviteToken(token) }),
     );
@@ -346,6 +377,30 @@ describe('resending and cancelling', () => {
     const { service, teamRepository } = setup();
     teamRepository.findInvitationById.mockResolvedValueOnce(
       listed({ acceptedAt: new Date(NOW.getTime() - DAY) }),
+    );
+
+    await expect(service.resend(BIZ, OWNER, 'invitation-1')).rejects.toBeInstanceOf(
+      InviteNotFoundError,
+    );
+  });
+
+  it('reports a lost resend race instead of a link nobody can use', async () => {
+    // The rotate misses because a concurrent resend already stored its hash,
+    // while the invitation is still waiting, so the call must not pretend its
+    // link is live.
+    const { service, teamRepository } = setup();
+    teamRepository.rotateInvitation.mockResolvedValueOnce(null);
+
+    await expect(service.resend(BIZ, OWNER, 'invitation-1')).rejects.toBeInstanceOf(
+      InviteResendConflictError,
+    );
+  });
+
+  it('reports a missing invitation when the lost resend race settled the invitation', async () => {
+    const { service, teamRepository } = setup();
+    teamRepository.rotateInvitation.mockResolvedValueOnce(null);
+    teamRepository.findInvitationById.mockResolvedValueOnce(
+      listed({ revokedAt: new Date(NOW.getTime() - DAY) }),
     );
 
     await expect(service.resend(BIZ, OWNER, 'invitation-1')).rejects.toBeInstanceOf(
@@ -454,6 +509,7 @@ describe('previewing an invitation', () => {
       email: 'sam@example.com',
       role: 'STAFF',
       expiresAt: invitation().expiresAt.toISOString(),
+      timezone: 'Asia/Dhaka',
       accountExists: true,
       hasPassword: true,
       alreadyMember: false,
@@ -505,12 +561,11 @@ describe('accepting an invitation', () => {
 
     expect(teamRepository.acceptInvitation).toHaveBeenCalledWith({
       invitationId: 'invitation-1',
-      email: 'sam@example.com',
-      role: 'STAFF',
-      name: 'Sam Staff',
+      tokenHash: hashInviteToken('raw-token'),
+      name: 'sam',
+      requestedName: 'Sam Staff',
       passwordHash: 'hashed-pass',
       existingUserId: undefined,
-      accountExists: false,
     });
     expect(tokenIssuer.issueTokensForUser).toHaveBeenCalledWith(INVITEE, BIZ);
     expect(result).toEqual({
@@ -554,7 +609,10 @@ describe('accepting an invitation', () => {
     await service.accept('raw-token', { password: 'first password' }, undefined);
 
     expect(teamRepository.acceptInvitation).toHaveBeenCalledWith(
-      expect.objectContaining({ existingUserId: INVITEE, accountExists: true }),
+      expect.objectContaining({
+        existingUserId: INVITEE,
+        tokenHash: hashInviteToken('raw-token'),
+      }),
     );
   });
 
@@ -571,13 +629,62 @@ describe('accepting an invitation', () => {
 
   it('accepts for the signed in owner of the invited address', async () => {
     const { service, authRepository, teamRepository } = setup();
-    authRepository.findUserById.mockResolvedValueOnce(user({ id: INVITEE }));
+    authRepository.findUserById.mockResolvedValueOnce(
+      user({ id: INVITEE, passwordHash: 'existing-hash' }),
+    );
 
     await service.accept('raw-token', {}, INVITEE);
 
     expect(teamRepository.acceptInvitation).toHaveBeenCalledWith(
       expect.objectContaining({ existingUserId: INVITEE, passwordHash: undefined }),
     );
+  });
+
+  it('makes a signed in caller with no password set one before accepting', async () => {
+    const { service, authRepository, teamRepository } = setup();
+    authRepository.findUserById.mockResolvedValueOnce(
+      user({ id: INVITEE, passwordHash: undefined }),
+    );
+
+    await expect(service.accept('raw-token', {}, INVITEE)).rejects.toBeInstanceOf(ValidationError);
+    expect(teamRepository.acceptInvitation).not.toHaveBeenCalled();
+  });
+
+  it('ignores a password sent by a signed in caller whose account already has one', async () => {
+    const { service, authRepository, teamRepository } = setup();
+    authRepository.findUserById.mockResolvedValueOnce(
+      user({ id: INVITEE, passwordHash: 'existing-hash' }),
+    );
+
+    await service.accept(
+      'raw-token',
+      { password: 'attacker chosen password', name: 'Renamed' },
+      INVITEE,
+    );
+
+    expect(teamRepository.acceptInvitation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        existingUserId: INVITEE,
+        passwordHash: undefined,
+        requestedName: undefined,
+      }),
+    );
+  });
+
+  it('lets a signed in caller set the first password on a passwordless account', async () => {
+    const { service, authRepository, teamRepository } = setup();
+    const bcrypt = await import('bcrypt');
+    vi.mocked(bcrypt.genSalt).mockResolvedValueOnce('salt' as never);
+    vi.mocked(bcrypt.hash).mockResolvedValueOnce('hashed-pass' as never);
+    authRepository.findUserById.mockResolvedValueOnce(
+      user({ id: INVITEE, passwordHash: undefined }),
+    );
+
+    await service.accept('raw-token', { password: 'first password' }, INVITEE);
+
+    expect(bcrypt.hash).toHaveBeenCalledWith('first password', 'salt');
+    const input = teamRepository.acceptInvitation.mock.calls[0][0] as { passwordHash?: string };
+    expect(input.passwordHash).toBe('hashed-pass');
   });
 
   it('refuses to accept twice because the address is already a member', async () => {
@@ -591,11 +698,50 @@ describe('accepting an invitation', () => {
 
   it('turns a membership race into the same conflict', async () => {
     const { service, teamRepository } = setup();
-    teamRepository.acceptInvitation.mockRejectedValueOnce(uniqueViolation());
+    teamRepository.acceptInvitation.mockRejectedValueOnce(
+      uniqueViolation('business_members_business_user_unq'),
+    );
 
     await expect(
       service.accept('raw-token', { password: 'long enough' }, undefined),
     ).rejects.toBeInstanceOf(InviteAlreadyMemberError);
+  });
+
+  it('joins the account that won a race to create it instead of reporting a member conflict', async () => {
+    const { service, teamRepository, authRepository, tokenIssuer } = setup();
+    authRepository.findUserByEmail
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(user({ id: 'user-winner', passwordHash: undefined }));
+    teamRepository.acceptInvitation
+      .mockRejectedValueOnce(uniqueViolation('users_email_lower_unq'))
+      .mockResolvedValueOnce({
+        membershipId: 'membership-winner',
+        userId: 'user-winner',
+        businessId: BIZ,
+        role: 'STAFF' as const,
+      });
+
+    await service.accept('raw-token', { password: 'long enough' }, undefined);
+
+    expect(teamRepository.acceptInvitation).toHaveBeenCalledTimes(2);
+    expect(teamRepository.acceptInvitation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ existingUserId: 'user-winner' }),
+    );
+    expect(tokenIssuer.issueTokensForUser).toHaveBeenCalledWith('user-winner', BIZ);
+  });
+
+  it('never overwrites the password of the account that won the race', async () => {
+    const { service, teamRepository, authRepository } = setup();
+    authRepository.findUserByEmail
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(user({ id: 'user-winner', passwordHash: 'existing-hash' }));
+    teamRepository.acceptInvitation.mockRejectedValueOnce(uniqueViolation('users_email_unique'));
+
+    await expect(
+      service.accept('raw-token', { password: 'attacker chosen password' }, undefined),
+    ).rejects.toBeInstanceOf(SignInRequiredError);
+
+    expect(teamRepository.acceptInvitation).toHaveBeenCalledOnce();
   });
 
   it('refuses an expired invitation', async () => {

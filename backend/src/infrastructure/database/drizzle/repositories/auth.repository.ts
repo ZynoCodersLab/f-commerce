@@ -4,6 +4,10 @@ import { users, businesses, businessMembers, refreshTokens } from '../schema.js'
 import type { User } from '../../../../domain/entities/user.entity.js';
 import { IAuthRepository } from '../../../../domain/repositories/auth.repository.js';
 
+function normaliseEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 function toUser(row: typeof users.$inferSelect): User {
   return {
     id: row.id,
@@ -36,7 +40,7 @@ export class DrizzleAuthRepository implements IAuthRepository {
     const result = await getDb()
       .insert(users)
       .values({
-        email: userData.email ?? '',
+        email: normaliseEmail(userData.email ?? ''),
         name: userData.name ?? '',
         passwordHash: userData.passwordHash ?? null,
         oauth: userData.oauth ?? [],
@@ -51,7 +55,7 @@ export class DrizzleAuthRepository implements IAuthRepository {
 
   async updateUser(userId: string, data: Partial<User>): Promise<void> {
     const changes: Partial<typeof users.$inferInsert> = { updatedAt: new Date() };
-    if (data.email !== undefined) changes.email = data.email;
+    if (data.email !== undefined) changes.email = normaliseEmail(data.email);
     if (data.passwordHash !== undefined) changes.passwordHash = data.passwordHash;
     if (data.name !== undefined) changes.name = data.name;
     if (data.oauth !== undefined) changes.oauth = data.oauth;

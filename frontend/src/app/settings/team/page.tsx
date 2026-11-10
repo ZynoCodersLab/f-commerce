@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/primitives';
 import { AppShell } from '@/components/shell/shell';
 import { useBusinessSettings } from '@/components/business/business-settings-provider';
-import { getAuth, clearAuth } from '@/lib/auth-client';
+import { clearAuth, getAuth, getUserIdFromToken } from '@/lib/auth-client';
 import { useRequireAuth } from '@/lib/auth-guard';
 import { formatDateTime } from '@/lib/catalog-format';
 import {
@@ -41,6 +41,10 @@ type LoadState = 'loading' | 'ready' | 'error';
 
 /** A pending poll while any invitation is still queued for sending. */
 const POLL_INTERVAL_MS = 5_000;
+/** After the first minute, slow down so a stuck worker is cheap to watch. */
+const SLOW_POLL_INTERVAL_MS = 30_000;
+/** One minute of five second polls before backing off. */
+const FAST_POLLS = 12;
 
 const EMAIL_STATUS_LABEL: Record<TeamInvitation['emailStatus'], string> = {
   QUEUED: 'Sending',
@@ -112,41 +116,22 @@ export default function TeamPage() {
   // the browser, so it is read once when the page opens.
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
-      setCurrentUserId(readUserId(getAuth()?.accessToken ?? null));
+      setCurrentUserId(getUserIdFromToken(getAuth()?.accessToken ?? null));
     });
     return () => cancelAnimationFrame(frame);
   }, []);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await fetchTeam();
-      setMembers(data.members);
-      setInvitations(data.invitations);
-      setState('ready');
-      setError(null);
-    } catch (caught) {
-      if (caught instanceof TeamApiError && caught.code === 'BUSINESS_ACCESS_DENIED') {
-        handleAccessLost();
-        return;
-      }
-      setError(caught instanceof Error ? caught.message : 'Could not load your team');
-      setState('error');
-    }
-  }, [handleAccessLost]);
-
-  useEffect(() => {
-    if (!ready) return;
-    let cancelled = false;
-
-    void (async () => {
+  const load = useCallback(
+    async (isCancelled: () => boolean = () => false) => {
       try {
         const data = await fetchTeam();
-        if (cancelled) return;
+        if (isCancelled()) return;
         setMembers(data.members);
         setInvitations(data.invitations);
         setState('ready');
+        setError(null);
       } catch (caught) {
-        if (cancelled) return;
+        if (isCancelled()) return;
         if (caught instanceof TeamApiError && caught.code === 'BUSINESS_ACCESS_DENIED') {
           handleAccessLost();
           return;
@@ -154,21 +139,49 @@ export default function TeamPage() {
         setError(caught instanceof Error ? caught.message : 'Could not load your team');
         setState('error');
       }
-    })();
+    },
+    [handleAccessLost],
+  );
 
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    // The state updates land after the fetch resolves, so this is not a render
+    // time setState even though the helper is called from the effect body.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [ready, reloadKey, handleAccessLost]);
+  }, [ready, reloadKey, load]);
 
   const queued = invitations.some((invitation) => invitation.emailStatus === 'QUEUED');
 
   useEffect(() => {
     if (!queued || !ready) return;
-    const timer = setInterval(() => {
-      void load();
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
+    let cancelled = false;
+    let polls = 0;
+    let timer: ReturnType<typeof setTimeout>;
+
+    // A chained timeout instead of an interval so the delay can grow once the
+    // send has been queued for a minute. The happy path still settles within
+    // five seconds; a stuck worker costs one request every thirty seconds.
+    const schedule = () => {
+      const delay = polls < FAST_POLLS ? POLL_INTERVAL_MS : SLOW_POLL_INTERVAL_MS;
+      timer = setTimeout(() => {
+        if (cancelled) return;
+        polls += 1;
+        void load().finally(() => {
+          if (!cancelled) schedule();
+        });
+      }, delay);
+    };
+
+    schedule();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [queued, ready, load]);
 
   const isOwner = useMemo(() => {
@@ -224,7 +237,9 @@ export default function TeamPage() {
       setNotice(
         caught instanceof TeamApiError && caught.code === 'RATE_LIMITED'
           ? 'Too many invitations in the last hour. Try again later.'
-          : 'Could not resend the invitation. Try again.',
+          : caught instanceof TeamApiError && caught.code === 'INVITE_RESEND_CONFLICT'
+            ? 'This invitation was just resent from somewhere else. The newest link is below.'
+            : 'Could not resend the invitation. Try again.',
       );
       setReloadKey((key) => key + 1);
     } finally {
@@ -263,7 +278,11 @@ export default function TeamPage() {
     setConfirmError(null);
     try {
       if (confirm.kind === 'cancel') {
-        await cancelInvite(confirm.invitation.id);
+        const cancelledId = confirm.invitation.id;
+        await cancelInvite(cancelledId);
+        // The one time link this panel shows is now dead, so drop it rather than
+        // leave a link on screen that no longer works.
+        setSent((current) => (current?.invitation.id === cancelledId ? null : current));
         setNotice('Invitation cancelled. The link no longer works.');
       } else {
         await removeMember(confirm.member.id);
@@ -276,8 +295,9 @@ export default function TeamPage() {
         setConfirm(null);
         return handleAccessLost();
       }
+      // Keep the dialog open on a failure so the message is visible and the
+      // action can be retried; closing it made a failed removal look done.
       setConfirmError('That did not work. Try again.');
-      setConfirm(null);
     } finally {
       setConfirmBusy(false);
     }
@@ -294,6 +314,13 @@ export default function TeamPage() {
   }
 
   const date = (value: string) => (mounted ? formatDateTime(value, timezone) : '');
+
+  // A sent invitation shows when it went out. One still waiting shows the last
+  // attempt, labelled Queued so the two are never confused (AC-5).
+  const sentLabel = (invitation: TeamInvitation) => {
+    if (invitation.sentAt) return date(invitation.sentAt);
+    return mounted ? `Queued ${date(invitation.lastSentAt)}` : '';
+  };
 
   return (
     <AppShell>
@@ -370,7 +397,10 @@ export default function TeamPage() {
                   <div className="mt-5 grid gap-3 rounded-md border border-border bg-surface-muted p-4">
                     <p className="text-sm text-body">{inviteLinkNotice(sent)}</p>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                      <code className="min-w-0 flex-1 break-all rounded-md bg-surface p-3 font-mono text-sm text-ink">
+                      <code
+                        aria-label="Invitation link"
+                        className="min-w-0 flex-1 break-all rounded-md bg-surface p-3 font-mono text-sm text-ink"
+                      >
                         {sent.inviteUrl}
                       </code>
                       <div className="flex gap-2">
@@ -433,6 +463,7 @@ export default function TeamPage() {
                         render: (member) => (
                           <MemberActions
                             busy={busyId === member.id}
+                            idPrefix="table"
                             isOwner={isOwner}
                             isSelf={member.userId === currentUserId}
                             member={member}
@@ -466,6 +497,7 @@ export default function TeamPage() {
                         </dl>
                         <MemberActions
                           busy={busyId === member.id}
+                          idPrefix="card"
                           isOwner={isOwner}
                           isSelf={member.userId === currentUserId}
                           member={member}
@@ -516,9 +548,7 @@ export default function TeamPage() {
                       {
                         key: 'sentAt',
                         label: 'Sent',
-                        render: (invitation) => (
-                          <span>{invitation.sentAt ? date(invitation.sentAt) : 'Not yet'}</span>
-                        ),
+                        render: (invitation) => <span>{sentLabel(invitation)}</span>,
                       },
                       {
                         key: 'expiresAt',
@@ -554,9 +584,7 @@ export default function TeamPage() {
                         <dl className="grid grid-cols-2 gap-2 text-sm">
                           <div>
                             <dt className="text-muted">Sent</dt>
-                            <dd className="text-ink">
-                              {invitation.sentAt ? date(invitation.sentAt) : 'Not yet'}
-                            </dd>
+                            <dd className="text-ink">{sentLabel(invitation)}</dd>
                           </div>
                           <div>
                             <dt className="text-muted">Expires</dt>
@@ -617,6 +645,7 @@ export default function TeamPage() {
 
 function MemberActions({
   member,
+  idPrefix,
   isOwner,
   isSelf,
   busy,
@@ -624,6 +653,7 @@ function MemberActions({
   onRemove,
 }: {
   member: TeamMember;
+  idPrefix: 'table' | 'card';
   isOwner: boolean;
   isSelf: boolean;
   busy: boolean;
@@ -634,15 +664,19 @@ function MemberActions({
     return <span className="text-sm text-muted">View only</span>;
   }
 
+  // The table and the card grid stay mounted together, so the id includes the
+  // layout to keep each label paired with exactly one control (AC-21).
+  const roleId = `role-${idPrefix}-${member.id}`;
+
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <label className="sr-only" htmlFor={`role-${member.id}`}>
+      <label className="sr-only" htmlFor={roleId}>
         Role for {member.name}
       </label>
       <Select
         className="max-w-32"
         disabled={busy || isSelf}
-        id={`role-${member.id}`}
+        id={roleId}
         onChange={(event) => onRoleChange(event.target.value === 'OWNER' ? 'OWNER' : 'STAFF')}
         value={member.role}
       >
@@ -732,19 +766,5 @@ async function copyLink(url: string, onDone: (message: string) => void): Promise
     onDone('Invite link copied.');
   } catch {
     onDone('Copying is blocked here. Select the link and copy it by hand.');
-  }
-}
-
-/** Reads the signed in user's id from the access token payload. */
-function readUserId(token: string | null): string | null {
-  if (!token) return null;
-  const segment = token.split('.')[1];
-  if (!segment) return null;
-  try {
-    const padded = segment.replace(/-/g, '+').replace(/_/g, '/');
-    const decoded = JSON.parse(atob(padded)) as { userId?: unknown };
-    return typeof decoded.userId === 'string' ? decoded.userId : null;
-  } catch {
-    return null;
   }
 }

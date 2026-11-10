@@ -1,4 +1,4 @@
-import { CookieOptions, Request, Response, Router } from 'express';
+import { Request, Response, Router } from 'express';
 import { AuthService } from '../../application/services/auth.service.js';
 import { requireAuth } from '../middlewares/auth.middleware.js';
 import { config } from '../../infrastructure/config.js';
@@ -6,29 +6,13 @@ import { RegisterSchema, LoginSchema, OAuthLoginSchema } from '@f-commerce/contr
 import { DrizzleAuthRepository } from '../../infrastructure/database/drizzle/repositories/auth.repository.js';
 import { DuplicateEmailError, UnauthorizedError, NotFoundError } from '../../domain/errors.js';
 import { sendInternalError } from './internal-error.js';
+import { setRefreshCookie } from './refresh-cookie.js';
 
 export const authRouter = Router();
 
 // Instantiate repository and service (simple DI for now)
 const authRepository = new DrizzleAuthRepository();
 const authService = new AuthService(authRepository);
-
-/**
- * The refresh token stays in a host only cookie scoped to the frontend origin.
- * Browser code reaches the API only through the Next.js proxy on that same
- * origin, which is what keeps the cookie first party. A client that called the
- * API on another domain would stop sending it; that topology needs
- * `SameSite=None`, a secure cookie, and an explicit CSRF defense.
- */
-const refreshCookieOptions: CookieOptions = {
-  httpOnly: true,
-  secure: config.NODE_ENV === 'production',
-  sameSite: 'strict',
-};
-
-function setRefreshCookie(res: Response, refreshToken: string): void {
-  res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-}
 
 authRouter.post('/register', async (req: Request, res: Response) => {
   try {
@@ -128,7 +112,12 @@ authRouter.post('/oauth/:provider', async (req: Request, res: Response) => {
     setRefreshCookie(res, tokens.refreshToken);
     res.status(200).json({ accessToken: tokens.accessToken, businessId });
   } catch (error) {
-    if (error instanceof UnauthorizedError) {
+    // Two first time OAuth logins for one address race the unique constraint, so
+    // the service turns the violation into DuplicateEmailError (409, like
+    // register) instead of a generic 500.
+    if (error instanceof DuplicateEmailError) {
+      res.status(409).json({ error: error.message });
+    } else if (error instanceof UnauthorizedError) {
       res.status(401).json({ error: error.message });
     } else {
       sendInternalError(res, error);

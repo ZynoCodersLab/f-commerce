@@ -105,9 +105,26 @@ describe('Auth Middleware', () => {
       });
     });
 
+    it('returns 400 for a malformed x-business-id without touching the database', async () => {
+      installRepository();
+      req.headers!['x-business-id'] = 'not-a-uuid';
+      req.user = { userId: '123', memberships: [] };
+
+      const middleware = requireBusinessRole(['OWNER']);
+      await middleware(req as Request, res as Response, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        error: 'Invalid x-business-id header',
+        message: 'Invalid x-business-id header',
+      });
+      expect(findMember).not.toHaveBeenCalled();
+      expect(next).not.toHaveBeenCalled();
+    });
+
     it('returns 401 if no user attached by requireAuth', async () => {
       installRepository();
-      req.headers!['x-business-id'] = 'biz1';
+      req.headers!['x-business-id'] = '00000000-0000-0000-0000-0000000000c1';
       req.user = undefined;
 
       const middleware = requireBusinessRole(['OWNER']);
@@ -122,8 +139,11 @@ describe('Auth Middleware', () => {
     // covers AC-17: access follows the stored membership, not the token claim
     it('returns 403 when the database has no active membership for the business', async () => {
       installRepository();
-      req.headers!['x-business-id'] = 'biz1';
-      req.user = { userId: '123', memberships: [{ businessId: 'biz1', role: 'OWNER' }] };
+      req.headers!['x-business-id'] = '00000000-0000-0000-0000-0000000000c1';
+      req.user = {
+        userId: '123',
+        memberships: [{ businessId: '00000000-0000-0000-0000-0000000000c1', role: 'OWNER' }],
+      };
       findMember.mockResolvedValueOnce(null);
 
       const middleware = requireBusinessRole(['OWNER']);
@@ -139,8 +159,11 @@ describe('Auth Middleware', () => {
     // covers AC-15: a removed member is refused on the very next request
     it('returns 403 when the membership was removed', async () => {
       installRepository();
-      req.headers!['x-business-id'] = 'biz1';
-      req.user = { userId: '123', memberships: [{ businessId: 'biz1', role: 'OWNER' }] };
+      req.headers!['x-business-id'] = '00000000-0000-0000-0000-0000000000c1';
+      req.user = {
+        userId: '123',
+        memberships: [{ businessId: '00000000-0000-0000-0000-0000000000c1', role: 'OWNER' }],
+      };
       findMember.mockResolvedValueOnce({ role: 'OWNER', status: 'REMOVED' });
 
       const middleware = requireBusinessRole(['OWNER']);
@@ -155,8 +178,11 @@ describe('Auth Middleware', () => {
     // covers AC-14: a token issued while the member was an owner does not keep the owner role
     it('uses the stored role so a demotion takes effect at once', async () => {
       installRepository();
-      req.headers!['x-business-id'] = 'biz1';
-      req.user = { userId: '123', memberships: [{ businessId: 'biz1', role: 'OWNER' }] };
+      req.headers!['x-business-id'] = '00000000-0000-0000-0000-0000000000c1';
+      req.user = {
+        userId: '123',
+        memberships: [{ businessId: '00000000-0000-0000-0000-0000000000c1', role: 'OWNER' }],
+      };
       findMember.mockResolvedValueOnce({ role: 'STAFF', status: 'ACTIVE' });
 
       const middleware = requireBusinessRole(['OWNER']);
@@ -170,15 +196,18 @@ describe('Auth Middleware', () => {
 
     it('allows STAFF user when role is allowed', async () => {
       installRepository();
-      req.headers!['x-business-id'] = 'biz1';
-      req.user = { userId: '123', memberships: [{ businessId: 'biz1', role: 'OWNER' }] };
+      req.headers!['x-business-id'] = '00000000-0000-0000-0000-0000000000c1';
+      req.user = {
+        userId: '123',
+        memberships: [{ businessId: '00000000-0000-0000-0000-0000000000c1', role: 'OWNER' }],
+      };
       findMember.mockResolvedValueOnce({ role: 'STAFF', status: 'ACTIVE' });
 
       const middleware = requireBusinessRole(['OWNER', 'STAFF']);
       await middleware(req as Request, res as Response, next);
 
       expect(runWithContext).toHaveBeenCalledWith(
-        { userId: '123', businessId: 'biz1', role: 'STAFF' },
+        { userId: '123', businessId: '00000000-0000-0000-0000-0000000000c1', role: 'STAFF' },
         expect.any(Function),
       );
       const callback = vi.mocked(runWithContext).mock.calls[0][1];
@@ -188,15 +217,18 @@ describe('Auth Middleware', () => {
 
     it('sets context and calls next on success', async () => {
       installRepository();
-      req.headers!['x-business-id'] = 'biz1';
-      req.user = { userId: '123', memberships: [{ businessId: 'biz1', role: 'OWNER' }] };
+      req.headers!['x-business-id'] = '00000000-0000-0000-0000-0000000000c1';
+      req.user = {
+        userId: '123',
+        memberships: [{ businessId: '00000000-0000-0000-0000-0000000000c1', role: 'OWNER' }],
+      };
       findMember.mockResolvedValueOnce({ role: 'OWNER', status: 'ACTIVE' });
 
       const middleware = requireBusinessRole(['OWNER']);
       await middleware(req as Request, res as Response, next);
 
       expect(runWithContext).toHaveBeenCalledWith(
-        { userId: '123', businessId: 'biz1', role: 'OWNER' },
+        { userId: '123', businessId: '00000000-0000-0000-0000-0000000000c1', role: 'OWNER' },
         expect.any(Function),
       );
 
@@ -208,8 +240,11 @@ describe('Auth Middleware', () => {
     // a database failure is a server problem, never a silent permission denial
     it('passes a database failure to the error handler', async () => {
       installRepository();
-      req.headers!['x-business-id'] = 'biz1';
-      req.user = { userId: '123', memberships: [{ businessId: 'biz1', role: 'OWNER' }] };
+      req.headers!['x-business-id'] = '00000000-0000-0000-0000-0000000000c1';
+      req.user = {
+        userId: '123',
+        memberships: [{ businessId: '00000000-0000-0000-0000-0000000000c1', role: 'OWNER' }],
+      };
       const failure = new Error('connection lost');
       findMember.mockRejectedValueOnce(failure);
 

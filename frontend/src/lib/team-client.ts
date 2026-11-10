@@ -7,7 +7,7 @@ import type {
   TeamListResponse,
   TeamMember,
 } from '@f-commerce/contracts';
-import { apiFetch } from './auth-client';
+import { apiFetch, fetchWithTimeout } from './auth-client';
 
 export interface TeamErrorBody {
   error?: string;
@@ -120,11 +120,13 @@ export async function removeMember(id: string): Promise<void> {
   await parseResponse<unknown>(response);
 }
 
-/** Public preview for the invite page. No session is required or sent. */
+/**
+ * Public preview for the invite page. The route reads no session, so the
+ * request deliberately sends no cookie.
+ */
 export async function fetchInvitePreview(token: string): Promise<InvitePreview> {
-  const response = await fetch(`/api/invitations/${encodeURIComponent(token)}`, {
+  const response = await fetchWithTimeout(`/api/invitations/${encodeURIComponent(token)}`, {
     headers: { Accept: 'application/json' },
-    credentials: 'include',
   });
   return parseResponse<InvitePreview>(response);
 }

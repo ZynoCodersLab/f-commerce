@@ -1,45 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { z } from 'zod';
-import { productionEmailProblems } from './config.js';
+import { envSchema, productionAppOriginProblems, productionEmailProblems } from './config.js';
 
-// We test the env schema logic by re-defining it here (mirroring config.ts)
-// and validating against controlled inputs. This avoids spawning child processes
-// or polluting the process-level config singleton.
-// The real config.ts uses the same schema, so this validates the contract.
-
-// An empty value means the variable is unset, matching the .env.example files.
-const optionalUrl = z.preprocess(
-  (value) => (value === '' ? undefined : value),
-  z.string().url().optional(),
-);
-
-const envSchema = z.object({
-  NODE_ENV: z.string().default('development'),
-  PORT: z.string().default('4000'),
-  DATABASE_URL: z
-    .string()
-    .url()
-    .default('postgresql://fcommerce:fcommerce@localhost:5432/fcommerce'),
-  REDIS_URL: z.string().url().default('redis://localhost:6379'),
-  TEST_DATABASE_URL: optionalUrl,
-  JWT_SECRET: z.string().min(32).default('super-secret-jwt-key-replace-in-production'),
-  JWT_REFRESH_SECRET: z
-    .string()
-    .min(32)
-    .default('super-secret-jwt-refresh-key-replace-in-production'),
-  OAUTH_GOOGLE_CLIENT_ID: z.string().optional(),
-  OAUTH_FACEBOOK_CLIENT_ID: z.string().optional(),
-  CLOUDINARY_CLOUD_NAME: z.string().default(''),
-  CLOUDINARY_API_KEY: z.string().default(''),
-  CLOUDINARY_API_SECRET: z.string().default(''),
-  CORS_ORIGINS: z.string().default('http://localhost:3000'),
-  APP_ORIGIN: z.string().url().default('http://localhost:3000'),
-  RESEND_API_KEY: z.string().optional(),
-  EMAIL_FROM: z
-    .preprocess((value) => (value === '' ? undefined : value), z.string())
-    .default('F Commerce <onboarding@resend.dev>'),
-  EMAIL_REPLY_TO: z.string().optional(),
-});
+// The tests parse the real schema exported by config.ts, so a new variable
+// can never be added to the runtime schema while this contract test keeps
+// validating an older copy.
 
 describe('config env schema', () => {
   describe('valid inputs', () => {
@@ -73,7 +37,24 @@ describe('config env schema', () => {
         expect(result.data.CLOUDINARY_API_KEY).toBe('');
         expect(result.data.CLOUDINARY_API_SECRET).toBe('');
         expect(result.data.CORS_ORIGINS).toBe('http://localhost:3000');
+        expect(result.data.APP_ORIGIN).toBe('http://localhost:3000');
+        expect(result.data.RATE_LIMIT_DISABLED).toBe(false);
         expect(result.data.NODE_ENV).toBe('development');
+      }
+    });
+
+    it('parses the test only rate limit flag as a boolean', () => {
+      const result = envSchema.safeParse({
+        PORT: '4000',
+        DATABASE_URL: 'postgresql://localhost:5432/test',
+        JWT_SECRET: 'a'.repeat(32),
+        JWT_REFRESH_SECRET: 'b'.repeat(32),
+        RATE_LIMIT_DISABLED: 'true',
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.RATE_LIMIT_DISABLED).toBe(true);
       }
     });
 
@@ -231,5 +212,110 @@ describe('production email requirements', () => {
         EMAIL_FROM: '',
       }),
     ).toEqual([]);
+  });
+
+  // These go through the real schema the way config.ts and worker.ts do, so a
+  // future default cannot silently defeat the production gate again.
+  it('reports a missing sender through the real schema in production', () => {
+    const result = envSchema.safeParse({
+      NODE_ENV: 'production',
+      RESEND_API_KEY: 're_live',
+      EMAIL_FROM: undefined,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.EMAIL_FROM).toBeUndefined();
+      expect(productionEmailProblems(result.data)).toEqual([
+        'EMAIL_FROM is required in production.',
+      ]);
+    }
+  });
+
+  it('treats an empty sender as unset through the real schema', () => {
+    const result = envSchema.safeParse({ NODE_ENV: 'production', EMAIL_FROM: '' });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.EMAIL_FROM).toBeUndefined();
+    }
+  });
+
+  it('does not report a missing sender on a development machine', () => {
+    const result = envSchema.safeParse({ NODE_ENV: 'development', EMAIL_FROM: undefined });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(productionEmailProblems(result.data)).toEqual([]);
+    }
+  });
+});
+
+describe('production app origin requirements', () => {
+  it('rejects a localhost origin in production', () => {
+    expect(
+      productionAppOriginProblems({
+        NODE_ENV: 'production',
+        APP_ORIGIN: 'http://localhost:3000',
+      }),
+    ).toEqual(['APP_ORIGIN must not point at localhost in production.']);
+  });
+
+  it('rejects the loopback aliases in production', () => {
+    expect(
+      productionAppOriginProblems({
+        NODE_ENV: 'production',
+        APP_ORIGIN: 'http://127.0.0.1:3000',
+      }),
+    ).toHaveLength(1);
+    expect(
+      productionAppOriginProblems({
+        NODE_ENV: 'production',
+        APP_ORIGIN: 'http://[::1]:3000',
+      }),
+    ).toHaveLength(1);
+  });
+
+  it('accepts a real origin in production', () => {
+    expect(
+      productionAppOriginProblems({
+        NODE_ENV: 'production',
+        APP_ORIGIN: 'https://shop.example.com',
+      }),
+    ).toEqual([]);
+  });
+
+  it('never blocks a development machine', () => {
+    expect(
+      productionAppOriginProblems({
+        NODE_ENV: 'development',
+        APP_ORIGIN: 'http://localhost:3000',
+      }),
+    ).toEqual([]);
+  });
+
+  it('reports an invalid origin in production', () => {
+    expect(
+      productionAppOriginProblems({ NODE_ENV: 'production', APP_ORIGIN: 'not-a-url' }),
+    ).toEqual(['APP_ORIGIN must be a valid URL in production.']);
+  });
+
+  // Goes through the real schema the way config.ts does, so the localhost
+  // default can never silently defeat the production gate again.
+  it('catches the default localhost origin through the real schema in production', () => {
+    const result = envSchema.safeParse({
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://localhost:5432/test',
+      JWT_SECRET: 'a'.repeat(32),
+      JWT_REFRESH_SECRET: 'b'.repeat(32),
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.APP_ORIGIN).toBe('http://localhost:3000');
+      expect(productionAppOriginProblems(result.data)).toEqual([
+        'APP_ORIGIN must not point at localhost in production.',
+      ]);
+    }
   });
 });

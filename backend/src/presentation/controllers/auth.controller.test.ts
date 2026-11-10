@@ -225,6 +225,20 @@ describe('Auth Controller', () => {
 
       expect(res.status).toBe(401);
     });
+
+    it('returns 409 when the OAuth email is already taken', async () => {
+      // Two first time logins for one address race the unique constraint, and
+      // DuplicateEmailError must map to the same 409 the register route uses.
+      vi.mocked(AuthService.prototype.oauthLogin).mockRejectedValueOnce(
+        new DuplicateEmailError('Email already exists'),
+      );
+
+      const res = await request(app)
+        .post('/api/auth/oauth/google')
+        .send({ email: 't@google.com', name: 'Test', providerId: 'google123' });
+
+      expect(res.status).toBe(409);
+    });
   });
 
   describe('POST /api/auth/refresh', () => {

@@ -1,30 +1,29 @@
-import { Worker } from 'bullmq';
-import type { Job } from 'bullmq';
-import type { Redis } from 'ioredis';
-import {
-  InviteEmailJobData,
-  INVITE_JOB_ATTEMPTS,
-  INVITE_QUEUE_NAME,
-} from '../../infrastructure/queue/invite-queue.js';
-import { config } from '../../infrastructure/config.js';
-import { DrizzleTeamRepository } from '../../infrastructure/database/drizzle/repositories/team.repository.js';
-import { DrizzleAuthRepository } from '../../infrastructure/database/drizzle/repositories/auth.repository.js';
-import { getDb } from '../../infrastructure/database/drizzle/client.js';
-import { businesses } from '../../infrastructure/database/drizzle/schema.js';
-import { eq } from 'drizzle-orm';
+import { INVITE_JOB_ATTEMPTS, type InviteEmailJobData } from './invite-job.js';
 import { ITeamRepository } from '../../domain/repositories/team.repository.js';
 import { IAuthRepository } from '../../domain/repositories/auth.repository.js';
 import { hashesMatch } from '../../domain/invitation-token.js';
-import { inviteUrlFor } from '../../infrastructure/services/invite-email.js';
-import { sendInviteEmail } from '../../infrastructure/services/resend-email.service.js';
+import type { InviteEmailContent } from '../../infrastructure/services/invite-email.js';
+import type { SendResult } from '../../infrastructure/services/resend-email.service.js';
 
 export interface InviteWorkerDeps {
   teamRepository: ITeamRepository;
   authRepository: IAuthRepository;
-  send: typeof sendInviteEmail;
-  businessName: (businessId: string) => Promise<string | null>;
-  appOrigin: string;
+  send: (content: InviteEmailContent, idempotencyKey: string) => Promise<SendResult>;
+  /** The configured reply address, or undefined to fall back to the inviter. */
+  emailReplyTo: string | undefined;
+  /** Builds the public invite link without the worker knowing the host rules. */
+  buildInviteUrl: (token: string) => string;
   now: () => Date;
+}
+
+/**
+ * Provider failures that cannot succeed by sending the same email again. They
+ * end the job on the first attempt instead of burning the 1/2/4 minute backoff.
+ */
+const PERMANENT_EMAIL_ERRORS = new Set(['EMAIL_NOT_CONFIGURED', 'PROVIDER_UNAUTHORIZED']);
+
+function isPermanentEmailError(errorCode: string | undefined): boolean {
+  return errorCode !== undefined && PERMANENT_EMAIL_ERRORS.has(errorCode);
 }
 
 export interface InviteJobOutcome {
@@ -44,6 +43,25 @@ export async function processInviteEmailJob(
   data: InviteEmailJobData,
   attemptNumber: number,
 ): Promise<InviteJobOutcome> {
+  try {
+    return await attemptInviteEmail(deps, data, attemptNumber);
+  } catch (error) {
+    // An unexpected throw still ends the job. On the last attempt the row must
+    // not stay QUEUED forever, so record why this invitation never sent.
+    if (attemptNumber >= INVITE_JOB_ATTEMPTS) {
+      await deps.teamRepository
+        .markEmailFailed(data.invitationId, data.tokenHash, 'EMAIL_SEND_FAILED')
+        .catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
+async function attemptInviteEmail(
+  deps: InviteWorkerDeps,
+  data: InviteEmailJobData,
+  attemptNumber: number,
+): Promise<InviteJobOutcome> {
   const context = await deps.teamRepository.findInvitationByTokenHash(data.tokenHash);
   if (!context) {
     // The token was rotated or the invitation deleted: this job is stale.
@@ -59,9 +77,28 @@ export async function processInviteEmailJob(
   }
   if (invitation.acceptedAt) return { outcome: 'IGNORED', reason: 'ACCEPTED' };
   if (invitation.revokedAt) return { outcome: 'IGNORED', reason: 'REVOKED' };
+  // A failed or skipped row is never legitimate to send. This closes the race
+  // where the create request timed out, marked the row FAILED, and the late job
+  // still reached the provider.
+  if (invitation.emailStatus !== 'QUEUED') {
+    return { outcome: 'IGNORED', reason: 'EMAIL_NOT_QUEUED' };
+  }
   if (invitation.expiresAt.getTime() <= deps.now().getTime()) {
     await deps.teamRepository.markEmailFailed(invitation.id, data.tokenHash, 'INVITE_EXPIRED');
     return { outcome: 'FAILED', reason: 'INVITE_EXPIRED' };
+  }
+
+  // An accept can finish after this job was queued. The address already has
+  // access, so never send the link and never leave the row waiting.
+  const alreadyMember = await deps.teamRepository.findMemberByEmail(
+    invitation.businessId,
+    invitation.email,
+  );
+  if (alreadyMember) {
+    await deps.teamRepository.revokeInvitation(invitation.businessId, invitation.id, {
+      userId: invitation.invitedByUserId,
+    });
+    return { outcome: 'IGNORED', reason: 'ALREADY_MEMBER' };
   }
 
   const inviter = await deps.authRepository.findUserById(invitation.invitedByUserId);
@@ -72,70 +109,25 @@ export async function processInviteEmailJob(
       businessName: context.businessName,
       inviterName: inviter?.name ?? context.inviterName,
       role: invitation.role,
-      inviteUrl: inviteUrlFor(deps.appOrigin, data.token),
+      inviteUrl: deps.buildInviteUrl(data.token),
       expiresAt: invitation.expiresAt,
-      replyTo: config.EMAIL_REPLY_TO || inviter?.email,
+      replyTo: deps.emailReplyTo || inviter?.email,
     },
     `invite:${invitation.id}:${invitation.tokenHash}`,
   );
 
-  await deps.teamRepository.setEmailAttempts(invitation.id, attemptNumber);
+  await deps.teamRepository.setEmailAttempts(invitation.id, data.tokenHash, attemptNumber);
 
   if (result.ok) {
     await deps.teamRepository.markEmailSent(invitation.id, data.tokenHash);
     return { outcome: 'SENT' };
   }
 
-  if (attemptNumber < INVITE_JOB_ATTEMPTS) {
+  if (!isPermanentEmailError(result.errorCode) && attemptNumber < INVITE_JOB_ATTEMPTS) {
     return { outcome: 'RETRY', reason: result.errorCode };
   }
 
   const reason = result.errorCode ?? 'EMAIL_SEND_FAILED';
   await deps.teamRepository.markEmailFailed(invitation.id, data.tokenHash, reason);
   return { outcome: 'FAILED', reason };
-}
-
-async function businessNameFor(businessId: string): Promise<string | null> {
-  const rows = await getDb()
-    .select({ name: businesses.name })
-    .from(businesses)
-    .where(eq(businesses.id, businessId))
-    .limit(1);
-  return rows[0]?.name ?? null;
-}
-
-export function createInviteWorker(connection: Redis): Worker<InviteEmailJobData> {
-  const deps: InviteWorkerDeps = {
-    teamRepository: new DrizzleTeamRepository(),
-    authRepository: new DrizzleAuthRepository(),
-    send: sendInviteEmail,
-    businessName: businessNameFor,
-    appOrigin: config.APP_ORIGIN,
-    now: () => new Date(),
-  };
-
-  const worker = new Worker<InviteEmailJobData>(
-    INVITE_QUEUE_NAME,
-    async (job: Job<InviteEmailJobData>) => {
-      const attempt = job.attemptsMade + 1;
-      const outcome = await processInviteEmailJob(deps, job.data, attempt);
-      if (outcome.outcome === 'RETRY') {
-        // A real failure so BullMQ applies the backoff and keeps the attempt count.
-        throw new Error(`Invitation email attempt ${attempt} failed: ${outcome.reason}`);
-      }
-      return outcome.outcome;
-    },
-    { connection, concurrency: 4 },
-  );
-
-  worker.on('failed', (job, error) => {
-    // Job ids and addresses are safe to log; the token never is.
-    console.error(`Invitation email job ${job?.id ?? 'unknown'} failed:`, error.message);
-  });
-
-  worker.on('stalled', (jobId) => {
-    console.error(`Invitation email job ${jobId} stalled and will be retried.`);
-  });
-
-  return worker;
 }

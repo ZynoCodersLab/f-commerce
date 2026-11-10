@@ -36,6 +36,8 @@ export type TeamAuditEntityType = (typeof TeamAuditEntity)[keyof typeof TeamAudi
 export const TeamErrorCode = {
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   INVITE_ALREADY_MEMBER: 'INVITE_ALREADY_MEMBER',
+  /** A resend lost a race with a resend of the same invitation from elsewhere. */
+  INVITE_RESEND_CONFLICT: 'INVITE_RESEND_CONFLICT',
   INVITE_ALREADY_PENDING: 'INVITE_ALREADY_PENDING',
   INVITE_NOT_FOUND: 'INVITE_NOT_FOUND',
   INVITE_EXPIRED: 'INVITE_EXPIRED',
@@ -65,7 +67,8 @@ export const TeamEmailSchema = z
 
 export const InviteCreateSchema = z.object({
   email: TeamEmailSchema,
-  role: TeamRoleEnum.default('STAFF').optional(),
+  /** Every invitation grants STAFF; accepting OWNER here would bypass the role flow. */
+  role: z.literal('STAFF').default('STAFF'),
 });
 
 export const InviteAcceptSchema = z.object({
@@ -82,7 +85,7 @@ export const MemberRoleUpdateSchema = z.object({
   role: TeamRoleEnum,
 });
 
-const isoDate = z.string();
+const isoDate = z.iso.datetime();
 
 export const TeamMemberSchema = z.object({
   id: z.string(),
@@ -99,6 +102,7 @@ export const TeamInvitationSchema = z.object({
   role: TeamRoleEnum,
   invitedByName: z.string(),
   sentAt: isoDate.nullable(),
+  lastSentAt: isoDate,
   createdAt: isoDate,
   expiresAt: isoDate,
   status: z.enum(['PENDING', 'EXPIRED']),
@@ -134,6 +138,12 @@ export const InvitePreviewSchema = z.object({
   email: z.string(),
   role: TeamRoleEnum,
   expiresAt: isoDate,
+  /**
+   * The invited business's zone, so a signed out visitor sees the expiry in the
+   * right place. Presence only: a legacy or corrupt stored zone must not fail a
+   * read, so the page falls back to its own zone when this is absent.
+   */
+  timezone: z.string().optional(),
   accountExists: z.boolean(),
   hasPassword: z.boolean(),
   alreadyMember: z.boolean(),
@@ -154,7 +164,7 @@ export const InviteAcceptResponseSchema = z.object({
   message: z.string(),
 });
 
-export type InviteCreateRequest = z.infer<typeof InviteCreateSchema>;
+export type InviteCreateRequest = z.input<typeof InviteCreateSchema>;
 export type InviteAcceptRequest = z.infer<typeof InviteAcceptSchema>;
 export type MemberRoleUpdateRequest = z.infer<typeof MemberRoleUpdateSchema>;
 export type TeamMember = z.infer<typeof TeamMemberSchema>;

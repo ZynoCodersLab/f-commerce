@@ -15,6 +15,14 @@ import {
   InvitationEmailStatus,
   InvitationRole,
 } from '../../../../domain/entities/invitation.entity.js';
+import {
+  InviteAlreadyAcceptedError,
+  InviteAlreadyMemberError,
+  InviteExpiredError,
+  InviteNotFoundError,
+  InviteRevokedError,
+  LastOwnerError,
+} from '../../../../domain/errors.js';
 import { TeamAuditAction, TeamAuditEntity } from '@f-commerce/contracts';
 
 type InvitationRow = typeof invitations.$inferSelect;
@@ -235,6 +243,7 @@ export class DrizzleTeamRepository implements ITeamRepository {
       .select({
         invitation: invitations,
         businessName: businesses.name,
+        businessTimezone: businesses.timezone,
         inviterName: users.name,
       })
       .from(invitations)
@@ -248,29 +257,48 @@ export class DrizzleTeamRepository implements ITeamRepository {
     return {
       invitation: toInvitation(row.invitation),
       businessName: row.businessName,
+      businessTimezone: row.businessTimezone,
       inviterName: row.inviterName,
     };
   }
 
   async createInvitation(data: NewInvitationData): Promise<Invitation> {
-    const now = new Date();
-    const rows = await getDb()
-      .insert(invitations)
-      .values({
-        businessId: data.businessId,
-        email: normaliseEmail(data.email),
-        role: data.role,
-        tokenHash: data.tokenHash,
-        invitedByUserId: data.invitedByUserId,
-        expiresAt: data.expiresAt,
-        lastSentAt: now,
-        emailStatus: 'QUEUED',
-        emailAttempts: 0,
-      })
-      .returning();
+    return getDb().transaction(async (tx) => {
+      const now = new Date();
+      const rows = await tx
+        .insert(invitations)
+        .values({
+          businessId: data.businessId,
+          email: normaliseEmail(data.email),
+          role: data.role,
+          tokenHash: data.tokenHash,
+          invitedByUserId: data.invitedByUserId,
+          expiresAt: data.expiresAt,
+          lastSentAt: now,
+          emailStatus: 'QUEUED',
+          emailAttempts: 0,
+        })
+        .returning();
 
-    if (rows.length === 0) throw new Error('Failed to create invitation');
-    return toInvitation(rows[0]);
+      const row = rows[0];
+      if (!row) throw new Error('Failed to create invitation');
+
+      await tx.insert(auditLogs).values({
+        businessId: data.businessId,
+        userId: data.invitedByUserId,
+        action: TeamAuditAction.INVITE_CREATED,
+        entityType: TeamAuditEntity.INVITATION,
+        entityId: row.id,
+        previousValue: JSON.stringify({ email: null }),
+        newValue: JSON.stringify({
+          email: row.email,
+          role: row.role,
+          expiresAt: data.expiresAt.toISOString(),
+        }),
+      });
+
+      return toInvitation(row);
+    });
   }
 
   async rotateInvitation(
@@ -279,11 +307,24 @@ export class DrizzleTeamRepository implements ITeamRepository {
     tokenHash: string,
     expiresAt: Date,
     audit: { userId: string },
+    expectedTokenHash: string,
   ): Promise<Invitation | null> {
     if (!isUuid(businessId) || !isUuid(invitationId)) return null;
 
     return getDb().transaction(async (tx) => {
       const now = new Date();
+      // Read before updating: RETURNING reports the row after the change, so
+      // the previous hash and expiry would otherwise be lost.
+      const previous = await tx
+        .select({ tokenHash: invitations.tokenHash, expiresAt: invitations.expiresAt })
+        .from(invitations)
+        .where(and(eq(invitations.id, invitationId), eq(invitations.businessId, businessId)))
+        .limit(1);
+
+      // The update also requires the stored hash to equal the one the caller
+      // read. Without that condition two resends racing one invitation both
+      // succeed, and the first owner is left looking at a link whose token has
+      // already been replaced by the second (and no longer matches).
       const rows = await tx
         .update(invitations)
         .set({
@@ -300,6 +341,7 @@ export class DrizzleTeamRepository implements ITeamRepository {
           and(
             eq(invitations.id, invitationId),
             eq(invitations.businessId, businessId),
+            eq(invitations.tokenHash, expectedTokenHash),
             isNull(invitations.acceptedAt),
             isNull(invitations.revokedAt),
           ),
@@ -315,7 +357,13 @@ export class DrizzleTeamRepository implements ITeamRepository {
         action: TeamAuditAction.INVITE_RESENT,
         entityType: TeamAuditEntity.INVITATION,
         entityId: row.id,
-        previousValue: JSON.stringify({ tokenHash: row.tokenHash, expiresAt: null }),
+        // When the guarded update matched, the hash the caller read is the one
+        // just replaced, so it is the true previous value. The hash is stored as
+        // a hash, never the raw token.
+        previousValue: JSON.stringify({
+          tokenHash: expectedTokenHash,
+          expiresAt: previous[0]?.expiresAt ?? null,
+        }),
         newValue: JSON.stringify({ email: row.email, role: row.role, expiresAt }),
       });
 
@@ -375,6 +423,10 @@ export class DrizzleTeamRepository implements ITeamRepository {
         and(
           eq(invitations.id, invitationId),
           eq(invitations.tokenHash, tokenHash),
+          // Only a row still waiting to send may change status. A late job that
+          // finishes after a timeout marked the row FAILED must not flip it to
+          // SENT, and a sent row must never be marked failed or skipped.
+          eq(invitations.emailStatus, 'QUEUED'),
           isNull(invitations.acceptedAt),
           isNull(invitations.revokedAt),
         ),
@@ -403,12 +455,12 @@ export class DrizzleTeamRepository implements ITeamRepository {
     return this.settleEmail(invitationId, tokenHash, { emailStatus: 'SKIPPED' });
   }
 
-  async setEmailAttempts(invitationId: string, attempts: number): Promise<void> {
+  async setEmailAttempts(invitationId: string, tokenHash: string, attempts: number): Promise<void> {
     if (!isUuid(invitationId)) return;
     await getDb()
       .update(invitations)
       .set({ emailAttempts: attempts, updatedAt: new Date() })
-      .where(eq(invitations.id, invitationId));
+      .where(and(eq(invitations.id, invitationId), eq(invitations.tokenHash, tokenHash)));
   }
 
   async updateMemberRole(
@@ -421,6 +473,10 @@ export class DrizzleTeamRepository implements ITeamRepository {
 
     return getDb().transaction(async (tx) => {
       const now = new Date();
+      // One lock per business serializes every role change and removal, so two
+      // owners demoted at the same moment cannot both pass the owner count.
+      await tx.execute(sql`select id from ${businesses} where id = ${businessId} for update`);
+
       // Read the role first: RETURNING reports the row after the update, so
       // the old value would be lost.
       const existing = await tx
@@ -437,6 +493,20 @@ export class DrizzleTeamRepository implements ITeamRepository {
 
       if (existing.length === 0) return null;
       const previousRole: InvitationRole = existing[0].role === 'OWNER' ? 'OWNER' : 'STAFF';
+
+      if (previousRole === 'OWNER' && role === 'STAFF') {
+        const owners = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(businessMembers)
+          .where(
+            and(
+              eq(businessMembers.businessId, businessId),
+              eq(businessMembers.status, 'ACTIVE'),
+              eq(businessMembers.role, 'OWNER'),
+            ),
+          );
+        if ((owners[0]?.count ?? 0) <= 1) throw new LastOwnerError();
+      }
 
       const rows = await tx
         .update(businessMembers)
@@ -477,7 +547,9 @@ export class DrizzleTeamRepository implements ITeamRepository {
         })
         .from(businessMembers)
         .innerJoin(users, eq(businessMembers.userId, users.id))
-        .where(eq(businessMembers.id, membershipId))
+        .where(
+          and(eq(businessMembers.id, membershipId), eq(businessMembers.businessId, businessId)),
+        )
         .limit(1);
 
       const found = member[0];
@@ -502,6 +574,37 @@ export class DrizzleTeamRepository implements ITeamRepository {
 
     return getDb().transaction(async (tx) => {
       const now = new Date();
+      // Same business lock as a role change: removal and demotion must not race
+      // each other past the last owner check.
+      await tx.execute(sql`select id from ${businesses} where id = ${businessId} for update`);
+
+      const existing = await tx
+        .select({ role: businessMembers.role })
+        .from(businessMembers)
+        .where(
+          and(
+            eq(businessMembers.id, membershipId),
+            eq(businessMembers.businessId, businessId),
+            eq(businessMembers.status, 'ACTIVE'),
+          ),
+        )
+        .limit(1);
+      if (existing.length === 0) return false;
+
+      if (existing[0].role === 'OWNER') {
+        const owners = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(businessMembers)
+          .where(
+            and(
+              eq(businessMembers.businessId, businessId),
+              eq(businessMembers.status, 'ACTIVE'),
+              eq(businessMembers.role, 'OWNER'),
+            ),
+          );
+        if ((owners[0]?.count ?? 0) <= 1) throw new LastOwnerError();
+      }
+
       const rows = await tx
         .update(businessMembers)
         .set({ status: 'REMOVED', removedAt: now, updatedAt: now })
@@ -533,55 +636,69 @@ export class DrizzleTeamRepository implements ITeamRepository {
 
   async acceptInvitation(input: {
     invitationId: string;
-    email: string;
-    role: InvitationRole;
+    tokenHash: string;
     name: string;
+    requestedName?: string;
     passwordHash?: string;
     existingUserId?: string;
-    existingUserName?: string;
-    accountExists: boolean;
   }): Promise<AcceptResult> {
-    const email = normaliseEmail(input.email);
-
     return getDb().transaction(async (tx) => {
-      // Lock the invitation so two accepts, or an accept racing a resend, can
-      // never both succeed. The row decides expiry, cancellation and whether it
-      // was already used.
+      // Lock the invitation so two accepts, or an accept racing a resend or a
+      // cancel, can never both succeed. The row decides expiry, cancellation,
+      // whether it was already used, and whether this link is still current.
       const locked = await tx.execute(
-        sql`select id, business_id, role, email, accepted_at, revoked_at, expires_at from ${invitations} where id = ${input.invitationId} for update`,
+        sql`select id, business_id, role, email, token_hash, accepted_at, revoked_at, expires_at from ${invitations} where id = ${input.invitationId} for update`,
       );
       const lockedRow = (locked.rows ?? [])[0] as
         | {
             business_id: string;
             role: string;
+            email: string;
+            token_hash: string;
             accepted_at: string | null;
             revoked_at: string | null;
             expires_at: string;
           }
         | undefined;
-      if (!lockedRow) throw new Error('Invitation disappeared during accept');
+      if (!lockedRow) throw new InviteNotFoundError();
+      // A resend replaces the hash, so the old link is no longer an invitation.
+      if (lockedRow.token_hash !== input.tokenHash) throw new InviteNotFoundError();
+      if (lockedRow.revoked_at) throw new InviteRevokedError();
+      if (lockedRow.accepted_at) throw new InviteAlreadyAcceptedError();
 
       const now = new Date();
+      if (toDate(lockedRow.expires_at).getTime() <= now.getTime()) throw new InviteExpiredError();
+
+      const email = normaliseEmail(lockedRow.email);
+      const role: InvitationRole = lockedRow.role === 'OWNER' ? 'OWNER' : 'STAFF';
       let userId = input.existingUserId;
-      let name = input.existingUserName ?? '';
+      const requestedName = input.requestedName?.trim();
+      // The body name wins, then a non blank stored name, then the caller's
+      // fallback (the invitation address local part).
+      let name = requestedName || input.name;
 
       if (userId) {
+        const row = (
+          await tx.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1)
+        )[0];
+        const storedName = row?.name.trim() ?? '';
+        name = requestedName || storedName || input.name;
+
+        if (name !== storedName) {
+          await tx.update(users).set({ name, updatedAt: now }).where(eq(users.id, userId));
+        }
         if (input.passwordHash) {
           await tx
             .update(users)
             .set({ passwordHash: input.passwordHash, updatedAt: now })
             .where(eq(users.id, userId));
         }
-        const row = (
-          await tx.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1)
-        )[0];
-        if (row) name = row.name;
       } else {
         const created = await tx
           .insert(users)
           .values({
             email,
-            name: input.name,
+            name: requestedName || input.name,
             passwordHash: input.passwordHash ?? null,
             oauth: [],
             isActive: true,
@@ -593,13 +710,26 @@ export class DrizzleTeamRepository implements ITeamRepository {
 
       const businessId = lockedRow.business_id;
 
-      // A previously removed member comes back with the invited role. A member
-      // who is still active is caught by the caller before this runs, and the
-      // unique index on (business, user) would also refuse a second row.
+      // Re-read the membership inside the lock. The caller checks before this
+      // transaction, so an active membership that appeared in between must not
+      // be silently rewritten to the invited role, which could demote an owner.
+      // A removed row is safe and is reactivated below.
+      const currentMembership = (
+        await tx
+          .select({ status: businessMembers.status })
+          .from(businessMembers)
+          .where(
+            and(eq(businessMembers.businessId, businessId), eq(businessMembers.userId, userId)),
+          )
+          .limit(1)
+      )[0];
+      if (currentMembership?.status === 'ACTIVE') throw new InviteAlreadyMemberError();
+
+      // A previously removed member comes back with the invited role.
       const reactivated = await tx
         .update(businessMembers)
         .set({
-          role: input.role,
+          role,
           status: 'ACTIVE',
           removedAt: null,
           updatedAt: now,
@@ -614,17 +744,26 @@ export class DrizzleTeamRepository implements ITeamRepository {
           .values({
             businessId,
             userId,
-            role: input.role,
+            role,
             status: 'ACTIVE',
           })
           .returning({ id: businessMembers.id });
         membershipId = inserted[0].id;
       }
 
-      await tx
+      const accepted = await tx
         .update(invitations)
         .set({ acceptedAt: now, acceptedByUserId: userId, updatedAt: now })
-        .where(and(eq(invitations.id, input.invitationId), isNull(invitations.acceptedAt)));
+        .where(
+          and(
+            eq(invitations.id, input.invitationId),
+            eq(invitations.tokenHash, input.tokenHash),
+            isNull(invitations.acceptedAt),
+            isNull(invitations.revokedAt),
+          ),
+        )
+        .returning({ id: invitations.id });
+      if (accepted.length === 0) throw new InviteAlreadyAcceptedError();
 
       await tx.insert(auditLogs).values({
         businessId,
@@ -636,13 +775,13 @@ export class DrizzleTeamRepository implements ITeamRepository {
         newValue: JSON.stringify({
           acceptedAt: now.toISOString(),
           membershipId,
-          role: input.role,
+          role,
           email,
           name,
         }),
       });
 
-      return { membershipId, userId, businessId, role: input.role };
+      return { membershipId, userId, businessId, role };
     });
   }
 }

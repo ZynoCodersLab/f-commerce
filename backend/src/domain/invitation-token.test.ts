@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   INVITE_TTL_MS,
+  buildInviteUrl,
   expiryFromNow,
   generateInviteToken,
   hashesMatch,
   hashInviteToken,
 } from './invitation-token.js';
+
+// Covers AC-20: 32 random bytes, a seven day expiry, and a SHA 256 hash in
+// place of the raw token.
 
 describe('invitation tokens', () => {
   it('generates 32 random bytes, url safe and unique', () => {
@@ -37,5 +41,14 @@ describe('invitation tokens', () => {
 
     expect(expiryFromNow(now).getTime() - now.getTime()).toBe(INVITE_TTL_MS);
     expect(INVITE_TTL_MS).toBe(7 * 24 * 60 * 60 * 1000);
+  });
+
+  it('builds the invite link from the app origin without doubling a slash', () => {
+    expect(buildInviteUrl('https://shop.example.com', 'abc')).toBe(
+      'https://shop.example.com/invite/abc',
+    );
+    expect(buildInviteUrl('https://shop.example.com/', 'abc')).toBe(
+      'https://shop.example.com/invite/abc',
+    );
   });
 });
