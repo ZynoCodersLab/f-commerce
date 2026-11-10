@@ -25,7 +25,7 @@ In development, leaving `RESEND_API_KEY` blank keeps everything working: invitat
 
 ## Order of a deploy
 
-1. Take a database backup. The migration deletes legacy `INVITED` rows and abandoned placeholder accounts.
+1. Take a database backup. The migration deletes legacy `INVITED` rows and abandoned placeholder accounts. The placeholder delete skips any account still referenced by `business_members` or `audit_logs`, so those accounts stay. A placeholder referenced only by `refresh_tokens` is deleted along with those tokens, because that foreign key cascades. The new `invitations` table is empty at this point and nothing else references a placeholder, so the delete does not abort. Restore the backup if the deleted row counts are not what you expect.
 2. Run the backend migration (`npm run db:migrate --workspace @f-commerce/backend`).
 3. Deploy the backend, then the worker, then the frontend.
 4. Invite yourself from the team screen and check that the email arrives. Watch the worker log for failed or stalled jobs.
@@ -35,6 +35,7 @@ In development, leaving `RESEND_API_KEY` blank keeps everything working: invitat
 - The worker logs a line for every failed and stalled job. A stalled job means the worker died with a job in flight; BullMQ hands it to another worker.
 - Email status is visible on the team screen: sending, sent, failed, or not emailed, with a plain language reason when it failed.
 - Invite links hold a secret in the path. They expire after 7 days and work once. Never paste one into a ticket or a log.
+- The backend trusts one proxy hop for the client address. Your host proxy must overwrite `X-Forwarded-For` with the real client address and must not pass a value supplied by the client through. If it passes one through, a caller can rotate the per address limits. The per token limits still cap attempts against one invite link.
 - Stopping the worker with `SIGTERM` lets it finish the jobs it is working on before it exits.
 
 ## Rolling back

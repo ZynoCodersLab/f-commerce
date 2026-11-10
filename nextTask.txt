@@ -1,1 +1,0 @@
-Heads up: the same silent skeleton pattern still exists at frontend/src/app/products/page.tsx:662 and frontend/src/app/customers/page.tsx:301. I left both alone because they belong to other features. They are worth the same treatment in their own polish passes.

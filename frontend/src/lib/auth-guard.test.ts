@@ -1,7 +1,11 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
+import { clearAuth, setAuth } from '@/lib/auth-client';
 import { useRequireAuth } from '@/lib/auth-guard';
+
+// Supports AC-7: an invitation page reads the session but never redirects a
+// signed in visitor away, so the link works in place for whoever opened it.
 
 const replaceMock = vi.fn();
 
@@ -41,6 +45,20 @@ describe('useRequireAuth', () => {
       renderHook(() => useRequireAuth());
 
       expect(replaceMock).toHaveBeenCalledWith('/login');
+    });
+
+    // covers AC-15: apiFetch clears the session, and the guard owns the redirect.
+    it('redirects to /login when the session is cleared while mounted', async () => {
+      setAuth({ accessToken: 'tok', businessId: 'biz-1' });
+      const { result } = renderHook(() => useRequireAuth());
+
+      expect(result.current).toBe(true);
+      expect(replaceMock).not.toHaveBeenCalled();
+
+      act(() => clearAuth());
+
+      await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/login'));
+      expect(result.current).toBe(false);
     });
   });
 
@@ -86,6 +104,31 @@ describe('useRequireAuth', () => {
       // wizard is the safe landing spot when the destination is unknown.
       await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/onboarding'));
       expect(resolve).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('public route that also serves a signed in visitor', () => {
+    it('keeps a signed in visitor on the page and renders it', () => {
+      window.localStorage.setItem('accessToken', 'tok');
+      window.localStorage.setItem('businessId', 'biz-1');
+
+      const { result } = renderHook(() =>
+        useRequireAuth({ requireAuth: false, redirectAuthenticated: false }),
+      );
+
+      // The invitation page reads the session but must never send the visitor
+      // away: the link has to work in place for whoever opened it.
+      expect(replaceMock).not.toHaveBeenCalled();
+      expect(result.current).toBe(true);
+    });
+
+    it('still renders for a signed out visitor', () => {
+      const { result } = renderHook(() =>
+        useRequireAuth({ requireAuth: false, redirectAuthenticated: false }),
+      );
+
+      expect(replaceMock).not.toHaveBeenCalled();
+      expect(result.current).toBe(true);
     });
   });
 });

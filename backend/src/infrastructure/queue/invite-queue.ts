@@ -1,20 +1,13 @@
-import { Queue, QueueEvents } from 'bullmq';
+import { Queue } from 'bullmq';
 import type { JobsOptions } from 'bullmq';
+import {
+  INVITE_JOB_ATTEMPTS,
+  type InviteEmailJobData,
+} from '../../application/services/invite-job.js';
 import { createRedisConnection } from './redis-connection.js';
 
 /** The single queue invitations travel through. */
 export const INVITE_QUEUE_NAME = 'invitation-email';
-
-/** What a job carries. The raw token lives here only while the job is pending. */
-export interface InviteEmailJobData {
-  invitationId: string;
-  tokenHash: string;
-  /** The plain token. Removed from Redis once the job settles (AC-20). */
-  token: string;
-}
-
-/** The first attempt plus three retries, at 1, 2 and 4 minutes (AC-3). */
-export const INVITE_JOB_ATTEMPTS = 4;
 
 export const INVITE_JOB_BACKOFF_MS = 60_000;
 
@@ -34,7 +27,6 @@ export function inviteJobOptions(invitationId: string, tokenHash: string): JobsO
 }
 
 let queue: Queue<InviteEmailJobData> | null = null;
-let queueEvents: QueueEvents | null = null;
 const connections: { quit(): Promise<unknown> }[] = [];
 
 function ensureQueue(): Queue<InviteEmailJobData> {
@@ -53,10 +45,6 @@ function ensureQueue(): Queue<InviteEmailJobData> {
     },
   });
 
-  const eventsConnection = createRedisConnection('producer');
-  connections.push(eventsConnection);
-  queueEvents = new QueueEvents(INVITE_QUEUE_NAME, { connection: eventsConnection });
-
   return queue;
 }
 
@@ -73,34 +61,47 @@ const ENQUEUE_TIMEOUT_MS = 2_000;
 export async function enqueueInviteEmail(data: InviteEmailJobData): Promise<boolean> {
   const active = ensureQueue();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+
+  // Keep the add promise even after the race is lost: Redis may still accept
+  // the job, and a late job must be removed or the worker would send an email
+  // the caller already recorded as failed.
+  const added = active.add(
+    'send-invitation',
+    data,
+    inviteJobOptions(data.invitationId, data.tokenHash),
+  );
 
   try {
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error('Redis did not accept the job in time')),
-        ENQUEUE_TIMEOUT_MS,
-      );
+      timer = setTimeout(() => {
+        timedOut = true;
+        reject(new Error('Redis did not accept the job in time'));
+      }, ENQUEUE_TIMEOUT_MS);
     });
 
-    await Promise.race([
-      active.add('send-invitation', data, inviteJobOptions(data.invitationId, data.tokenHash)),
-      timeout,
-    ]);
+    await Promise.race([added, timeout]);
     return true;
   } catch (error) {
     console.error('Could not queue an invitation email:', (error as Error).message);
+    if (timedOut) {
+      void added
+        .then((job) => job.remove())
+        .catch(() => {
+          // Redis stayed unreachable, so there is no job to remove.
+        });
+    }
     return false;
   } finally {
     if (timer) clearTimeout(timer);
   }
 }
 
-/** Close the producer and its event stream. Used at shutdown and in tests. */
+/** Close the producer and its connection. Used at shutdown and in tests. */
 export async function closeInviteQueue(): Promise<void> {
-  const open = [queue, queueEvents].filter((value): value is Queue | QueueEvents => value !== null);
+  const open = queue;
   queue = null;
-  queueEvents = null;
-  await Promise.allSettled(open.map((value) => value.close()));
+  if (open) await Promise.allSettled([open.close()]);
   await Promise.allSettled(connections.map((connection) => connection.quit()));
   connections.length = 0;
 }

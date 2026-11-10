@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,6 +15,9 @@ vi.mock('next/navigation', () => ({
 }));
 
 import TeamPage from './page';
+
+// Covers AC-2, AC-5, AC-15, and AC-21 on the team screen: the owner and staff
+// views, the pending list, the one time link, access denial, and retry states.
 
 function jsonResponse(status: number, body: object): Response {
   return new Response(JSON.stringify(body), {
@@ -60,7 +63,8 @@ const teamBody = {
         email: 'new@example.com',
         role: 'STAFF',
         invitedByName: 'Maya Owner',
-        sentAt: null,
+        sentAt: '2026-03-01T09:05:00.000Z',
+        lastSentAt: '2026-03-01T09:05:00.000Z',
         createdAt: '2026-03-01T09:00:00.000Z',
         expiresAt: '2026-03-08T09:00:00.000Z',
         status: 'PENDING',
@@ -75,6 +79,7 @@ const teamBody = {
 describe('TeamPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
     window.localStorage.clear();
   });
 
@@ -95,7 +100,77 @@ describe('TeamPage', () => {
     expect(screen.getAllByText('sam@example.com').length).toBeGreaterThan(0);
     expect(screen.getAllByText('new@example.com').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Email sent').length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: /send invitation/i })).toBeDisabled();
+    // The owner id is read in a deferred effect, so wait for the owner view.
+    expect(await screen.findByRole('button', { name: /send invitation/i })).toBeDisabled();
+  });
+
+  it('labels a queued invitation with its last attempt instead of not yet', async () => {
+    setAuth({ accessToken: token({ userId: OWNER_ID }), businessId: 'biz-1' });
+    const queuedBody = {
+      ...teamBody,
+      data: {
+        ...teamBody.data,
+        invitations: [
+          {
+            ...teamBody.data.invitations[0],
+            sentAt: null,
+            lastSentAt: '2026-03-01T09:05:00.000Z',
+            emailStatus: 'QUEUED',
+          },
+        ],
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async () => jsonResponse(200, queuedBody)),
+    );
+
+    render(
+      <ThemeBoundary>
+        <TeamPage />
+      </ThemeBoundary>,
+    );
+
+    expect((await screen.findAllByText(/Queued/)).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Not yet')).not.toBeInTheDocument();
+  });
+
+  it('backs off polling after a minute while an invitation stays queued', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    setAuth({ accessToken: token({ userId: OWNER_ID }), businessId: 'biz-1' });
+    const queuedBody = {
+      ...teamBody,
+      data: {
+        ...teamBody.data,
+        invitations: [{ ...teamBody.data.invitations[0], emailStatus: 'QUEUED' }],
+      },
+    };
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse(200, queuedBody));
+    vi.stubGlobal('fetch', fetchMock);
+    const teamCalls = () =>
+      fetchMock.mock.calls.filter(([input]) => String(input) === '/api/team').length;
+
+    render(
+      <ThemeBoundary>
+        <TeamPage />
+      </ThemeBoundary>,
+    );
+
+    // Let the first load settle while the clock is frozen.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(teamCalls()).toBe(1);
+
+    // Twelve five second polls cover the first minute.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(teamCalls()).toBe(13);
+
+    // The next poll is thirty seconds away, not five.
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(teamCalls()).toBe(13);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(teamCalls()).toBe(14);
   });
 
   it('shows a read only view for staff', async () => {
@@ -230,5 +305,111 @@ describe('TeamPage', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /try again/i }));
     expect((await screen.findAllByText('Maya Owner'))[0]).toBeVisible();
+  });
+
+  it('keeps the confirmation open and shows the error when a cancel fails', async () => {
+    setAuth({ accessToken: token({ userId: OWNER_ID }), businessId: 'biz-1' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (_input: RequestInfo, init?: RequestInit) => {
+        if (init?.method === 'DELETE') {
+          return jsonResponse(500, { error: 'INTERNAL_ERROR', message: 'Something broke' });
+        }
+        return jsonResponse(200, teamBody);
+      }),
+    );
+
+    render(
+      <ThemeBoundary>
+        <TeamPage />
+      </ThemeBoundary>,
+    );
+
+    const user = userEvent.setup();
+    const cancelButtons = await screen.findAllByRole('button', { name: /^cancel$/i });
+    await user.click(cancelButtons[0]);
+    await user.click(await screen.findByRole('button', { name: /cancel invitation/i }));
+
+    // The dialog stays open with its message, so a failed removal is never
+    // mistaken for success.
+    expect(await screen.findByText(/that did not work/i)).toBeVisible();
+    expect(screen.getByRole('button', { name: /cancel invitation/i })).toBeVisible();
+  });
+
+  it('keeps role control ids unique across the table and card views', async () => {
+    setAuth({ accessToken: token({ userId: OWNER_ID }), businessId: 'biz-1' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async () => jsonResponse(200, teamBody)),
+    );
+
+    render(
+      <ThemeBoundary>
+        <TeamPage />
+      </ThemeBoundary>,
+    );
+
+    await screen.findAllByText('Maya Owner');
+
+    // The signed in id is read after mount, so wait for the owner controls
+    // before collecting ids.
+    await waitFor(() => {
+      expect(document.querySelectorAll('[id^="role-"]').length).toBeGreaterThan(0);
+    });
+
+    // Both the desktop table and the mobile card grid stay mounted, so each
+    // member has two role controls. Their ids must not collide (AC-21).
+    const ids = Array.from(document.querySelectorAll<HTMLElement>('[id^="role-"]')).map(
+      (element) => element.id,
+    );
+    expect(new Set(ids).size).toBe(ids.length);
+
+    for (const label of document.querySelectorAll<HTMLLabelElement>('label[for]')) {
+      expect(document.getElementById(label.htmlFor)).not.toBeNull();
+    }
+  });
+
+  it('clears the one time link when its invitation is cancelled', async () => {
+    setAuth({ accessToken: token({ userId: OWNER_ID }), businessId: 'biz-1' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (input: RequestInfo, init?: RequestInit) => {
+        if (init?.method === 'DELETE') {
+          return jsonResponse(200, { success: true, data: {} });
+        }
+        if (String(input).includes('/api/team/invitations')) {
+          return jsonResponse(201, {
+            success: true,
+            data: {
+              invitation: teamBody.data.invitations[0],
+              inviteUrl: 'https://shop.example.com/invite/abc123',
+              emailStatus: 'QUEUED',
+              emailError: null,
+            },
+            message: 'Invitation created',
+          });
+        }
+        return jsonResponse(200, teamBody);
+      }),
+    );
+
+    render(
+      <ThemeBoundary>
+        <TeamPage />
+      </ThemeBoundary>,
+    );
+
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText(/email address/i), 'New@Example.com');
+    await user.click(screen.getByRole('button', { name: /send invitation/i }));
+    expect(await screen.findByText('https://shop.example.com/invite/abc123')).toBeVisible();
+
+    const cancelButtons = await screen.findAllByRole('button', { name: /^cancel$/i });
+    await user.click(cancelButtons[0]);
+    await user.click(await screen.findByRole('button', { name: /cancel invitation/i }));
+
+    await waitFor(() =>
+      expect(screen.queryByText('https://shop.example.com/invite/abc123')).not.toBeInTheDocument(),
+    );
   });
 });
