@@ -139,6 +139,45 @@ describe('shared store reset', () => {
   });
 });
 
+describe('shared store increment', () => {
+  it('sets the window on the first count and keeps it on later counts', async () => {
+    if (!redisUp) return;
+    const store = new RedisRateLimitStore(redis, 'team-increment');
+    store.init({ windowMs: 60_000 } as Options);
+
+    const first = await store.increment('owner-a');
+    const firstTtl = await redis.pttl(
+      `ratelimit:team-increment:${createHash('sha256').update('owner-a').digest('hex')}`,
+    );
+    expect(first.totalHits).toBe(1);
+    expect(firstTtl).toBeGreaterThan(0);
+    expect(firstTtl).toBeLessThanOrEqual(60_000);
+
+    const second = await store.increment('owner-a');
+    const secondTtl = await redis.pttl(
+      `ratelimit:team-increment:${createHash('sha256').update('owner-a').digest('hex')}`,
+    );
+    expect(second.totalHits).toBe(2);
+    expect(secondTtl).toBeGreaterThan(0);
+    expect(secondTtl).toBeLessThanOrEqual(firstTtl);
+  });
+
+  it('repairs a counter that lost its expiry instead of keeping it forever', async () => {
+    if (!redisUp) return;
+    const store = new RedisRateLimitStore(redis, 'team-increment');
+    store.init({ windowMs: 60_000 } as Options);
+    const key = `ratelimit:team-increment:${createHash('sha256')
+      .update('owner-legacy')
+      .digest('hex')}`;
+    await redis.set(key, '9');
+
+    const result = await store.increment('owner-legacy');
+
+    expect(result.totalHits).toBe(10);
+    expect(await redis.pttl(key)).toBeGreaterThan(0);
+  });
+});
+
 describe('shared store decrement', () => {
   it('does not create a counter when the key was never counted', async () => {
     if (!redisUp) return;
@@ -183,7 +222,6 @@ describe('shared store decrement', () => {
 describe('accept rate limiter', () => {
   it('counts one address once across API instances', async () => {
     if (!redisUp) return;
-    await clearPrefix();
     const ip = '198.51.100.61';
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -203,7 +241,6 @@ describe('accept rate limiter', () => {
 
   it('caps one invite token even when the caller rotates its address', async () => {
     if (!redisUp) return;
-    await clearPrefix();
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const response = await request(first)

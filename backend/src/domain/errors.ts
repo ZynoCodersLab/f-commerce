@@ -6,6 +6,14 @@ export class DomainError extends Error {
   }
 }
 
+/**
+ * The provider result code for a missing email API key.
+ *
+ * The sender returns it, and the worker treats it as permanent, so both read
+ * one constant instead of keeping two copies of the same string in step.
+ */
+export const EMAIL_NOT_CONFIGURED = 'EMAIL_NOT_CONFIGURED';
+
 export class DuplicateEmailError extends DomainError {
   constructor(message: string = 'Email already exists') {
     super(message);

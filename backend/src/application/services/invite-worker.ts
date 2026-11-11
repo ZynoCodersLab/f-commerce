@@ -1,9 +1,9 @@
 import { INVITE_JOB_ATTEMPTS, type InviteEmailJobData } from './invite-job.js';
 import { ITeamRepository } from '../../domain/repositories/team.repository.js';
 import { IAuthRepository } from '../../domain/repositories/auth.repository.js';
+import { EMAIL_NOT_CONFIGURED } from '../../domain/errors.js';
 import { hashesMatch } from '../../domain/invitation-token.js';
-import type { InviteEmailContent } from '../../infrastructure/services/invite-email.js';
-import type { SendResult } from '../../infrastructure/services/resend-email.service.js';
+import type { InviteEmailContent, SendResult } from './invite-email.port.js';
 
 export interface InviteWorkerDeps {
   teamRepository: ITeamRepository;
@@ -20,7 +20,7 @@ export interface InviteWorkerDeps {
  * Provider failures that cannot succeed by sending the same email again. They
  * end the job on the first attempt instead of burning the 1/2/4 minute backoff.
  */
-const PERMANENT_EMAIL_ERRORS = new Set(['EMAIL_NOT_CONFIGURED', 'PROVIDER_UNAUTHORIZED']);
+const PERMANENT_EMAIL_ERRORS = new Set([EMAIL_NOT_CONFIGURED, 'PROVIDER_UNAUTHORIZED']);
 
 function isPermanentEmailError(errorCode: string | undefined): boolean {
   return errorCode !== undefined && PERMANENT_EMAIL_ERRORS.has(errorCode);
@@ -46,8 +46,9 @@ export async function processInviteEmailJob(
   try {
     return await attemptInviteEmail(deps, data, attemptNumber);
   } catch (error) {
-    // An unexpected throw still ends the job. On the last attempt the row must
-    // not stay QUEUED forever, so record why this invitation never sent.
+    // An unexpected throw still ends the job, and only this path lands here:
+    // the normal failure path records the provider reason. On the last attempt
+    // the row must not stay QUEUED forever, so store the generic code instead.
     if (attemptNumber >= INVITE_JOB_ATTEMPTS) {
       await deps.teamRepository
         .markEmailFailed(data.invitationId, data.tokenHash, 'EMAIL_SEND_FAILED')
@@ -95,6 +96,9 @@ async function attemptInviteEmail(
     invitation.email,
   );
   if (alreadyMember) {
+    // The revoke audit names the inviter as the actor even though the worker
+    // made the change. As with the same race in the create path, the trail
+    // records what happened: the invite is gone because the person joined.
     await deps.teamRepository.revokeInvitation(invitation.businessId, invitation.id, {
       userId: invitation.invitedByUserId,
     });

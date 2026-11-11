@@ -7,6 +7,26 @@ import { config } from '../../infrastructure/config.js';
 import { MemoryFallbackStore } from './memory-fallback-store.js';
 
 /**
+ * Count one hit, and start the window on the first hit.
+ *
+ * A plain INCR followed by `PEXPIRE key ms NX` needs Redis 7.0. On 6.x Redis
+ * rejects the extra NX argument while it queues the transaction, so EXEC
+ * aborts and every request falls back to the in process counter: the shared
+ * limit silently disappears. One script does both steps atomically on every
+ * Redis version the project supports, and it also repairs a counter that lost
+ * its TTL for any other reason.
+ */
+const INCREMENT_SCRIPT = `
+  local hits = redis.call('INCR', KEYS[1])
+  local ttl = redis.call('PTTL', KEYS[1])
+  if ttl < 0 then
+    redis.call('PEXPIRE', KEYS[1], ARGV[1])
+    ttl = tonumber(ARGV[1])
+  end
+  return {hits, ttl}
+`;
+
+/**
  * Undo one counted hit without ever creating a counter.
  *
  * A plain DECR on a missing key creates -1 with no expiry: the key then never
@@ -60,17 +80,17 @@ export class RedisRateLimitStore implements Store {
   async increment(key: string): Promise<{ totalHits: number; resetTime: Date | undefined }> {
     const redisKey = this.keyFor(key);
     try {
-      const results = await this.redis
-        .multi()
-        .incr(redisKey)
-        .pexpire(redisKey, this.windowMs, 'NX')
-        .pttl(redisKey)
-        .exec();
+      const [total, ttl] = (await this.redis.eval(
+        INCREMENT_SCRIPT,
+        1,
+        redisKey,
+        String(this.windowMs),
+      )) as [number, number];
+      if (typeof total !== 'number' || typeof ttl !== 'number') {
+        throw new Error('Unexpected rate limit reply');
+      }
 
-      const [[incrError, total], , [ttlError, ttl]] = results ?? [];
-      if (incrError || ttlError || typeof total !== 'number') throw incrError ?? ttlError;
-
-      const remaining = typeof ttl === 'number' && ttl > 0 ? ttl : this.windowMs;
+      const remaining = ttl > 0 ? ttl : this.windowMs;
       return { totalHits: total, resetTime: new Date(Date.now() + remaining) };
     } catch {
       // Fail open: keep counting locally so one instance still caps a flood.
@@ -133,9 +153,10 @@ function redisClient(): Redis {
       maxRetriesPerRequest: 1,
       enableReadyCheck: false,
       connectionName: 'f-commerce-rate-limit',
-      // Give up on the first connect failure so the request falls through to
-      // the in process counter instead of waiting in an offline queue. A later
-      // request retries the connection on its own.
+      // A command that cannot reach Redis fails after one retry, so the
+      // request falls through to the in process counter instead of waiting in
+      // an offline queue. The connection itself keeps retrying in the
+      // background on the strategy below, so a later request finds it healthy.
       connectTimeout: 1_000,
       retryStrategy: (attempt) => Math.min(attempt * 500, 10_000),
     });
@@ -210,7 +231,7 @@ function teamLimiter(
 // requireAuth runs before every route that uses this limiter, so req.user is
 // always set; the fallback only satisfies the optional type.
 const ownerKey = (req: Request): string => `owner:${req.user?.userId ?? 'anonymous'}`;
-/** The address as express-rate-limit counts it, normalised for IPv6. */
+/** The address as express-rate-limit counts it, normalized for IPv6. */
 const ipKey = (req: Request): string => `ip:${ipKeyGenerator(req.ip ?? 'unknown')}`;
 /**
  * The invite token when the route carries one, so a flood against a single

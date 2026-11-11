@@ -1,11 +1,11 @@
 import { Resend } from 'resend';
 import { config } from '../config.js';
-import {
+import { EMAIL_NOT_CONFIGURED } from '../../domain/errors.js';
+import type {
   InviteEmailContent,
-  buildInviteHtml,
-  buildInviteSubject,
-  buildInviteText,
-} from './invite-email.js';
+  SendResult,
+} from '../../application/services/invite-email.port.js';
+import { buildInviteHtml, buildInviteSubject, buildInviteText } from './invite-email.js';
 
 /** The sandbox sender a development machine uses when EMAIL_FROM is unset. */
 const DEFAULT_INVITE_FROM = 'F Commerce <onboarding@resend.dev>';
@@ -20,15 +20,6 @@ function getResendClient(apiKey: string): Resend {
 /** The provider is configured (or not) in one place, so the worker can skip cleanly. */
 export function isEmailConfigured(): boolean {
   return typeof config.RESEND_API_KEY === 'string' && config.RESEND_API_KEY.trim() !== '';
-}
-
-export interface SendResult {
-  ok: boolean;
-  /**
-   * A short, safe reason for the team screen. Provider messages are trimmed of
-   * anything that looks like a key, URL or stack.
-   */
-  errorCode?: string;
 }
 
 /**
@@ -65,7 +56,7 @@ export async function sendInviteEmail(
   idempotencyKey: string,
 ): Promise<SendResult> {
   const apiKey = config.RESEND_API_KEY;
-  if (!apiKey) return { ok: false, errorCode: 'EMAIL_NOT_CONFIGURED' };
+  if (!apiKey) return { ok: false, errorCode: EMAIL_NOT_CONFIGURED };
 
   const resend = getResendClient(apiKey);
 

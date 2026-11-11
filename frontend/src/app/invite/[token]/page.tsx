@@ -53,7 +53,7 @@ function problemFor(error: unknown): Problem {
       case 'RATE_LIMITED':
         return {
           title: 'Too many attempts',
-          body: 'Wait a minute, then open the link again.',
+          body: 'Try again later.',
         };
       default:
         return { title: 'This invitation cannot be used', body: error.message };

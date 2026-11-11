@@ -152,6 +152,26 @@ describe('InvitePage', () => {
     expect(await screen.findByText(/invitation has expired/i)).toBeVisible();
   });
 
+  it('asks a rate limited visitor to try again later', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockImplementation(async () =>
+          jsonResponse(429, { error: 'RATE_LIMITED', message: 'Too many requests' }),
+        ),
+    );
+
+    render(
+      <ThemeBoundary>
+        <InvitePage />
+      </ThemeBoundary>,
+    );
+
+    expect(await screen.findByText(/too many attempts/i)).toBeVisible();
+    expect(screen.getByText(/try again later/i)).toBeVisible();
+  });
+
   it('keeps an already signed in visitor on the invite page', async () => {
     setAuth({ accessToken: 'tok', businessId: 'biz-1' });
     expect(window.localStorage.getItem('accessToken')).toBe('tok');

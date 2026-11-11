@@ -684,14 +684,13 @@ export class DrizzleTeamRepository implements ITeamRepository {
         const storedName = row?.name.trim() ?? '';
         name = requestedName || storedName || input.name;
 
-        if (name !== storedName) {
-          await tx.update(users).set({ name, updatedAt: now }).where(eq(users.id, userId));
-        }
-        if (input.passwordHash) {
-          await tx
-            .update(users)
-            .set({ passwordHash: input.passwordHash, updatedAt: now })
-            .where(eq(users.id, userId));
+        const changes: { name?: string; passwordHash?: string; updatedAt: Date } = {
+          updatedAt: now,
+        };
+        if (name !== storedName) changes.name = name;
+        if (input.passwordHash) changes.passwordHash = input.passwordHash;
+        if (changes.name !== undefined || changes.passwordHash !== undefined) {
+          await tx.update(users).set(changes).where(eq(users.id, userId));
         }
       } else {
         const created = await tx

@@ -10,13 +10,9 @@ import { RedisRateLimitStore } from './invite-rate-limit.middleware.js';
 // same opaque hash the Redis path would, never the raw token. This pins that.
 
 function failingRedis(): Redis {
-  const chain = {
-    incr: () => chain,
-    pexpire: () => chain,
-    pttl: () => chain,
-    exec: () => Promise.reject(new Error('redis is down')),
-  };
-  return { multi: () => chain } as unknown as Redis;
+  return {
+    eval: () => Promise.reject(new Error('redis is down')),
+  } as unknown as Redis;
 }
 
 describe('RedisRateLimitStore fallback key hygiene', () => {

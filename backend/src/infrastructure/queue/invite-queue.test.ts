@@ -21,7 +21,12 @@ vi.mock('./redis-connection.js', () => ({
   }),
 }));
 
-import { closeInviteQueue, enqueueInviteEmail } from './invite-queue.js';
+import {
+  INVITE_JOB_BACKOFF_MS,
+  closeInviteQueue,
+  enqueueInviteEmail,
+  inviteJobOptions,
+} from './invite-queue.js';
 
 const JOB = {
   invitationId: 'invitation-1',
@@ -69,5 +74,22 @@ describe('enqueueInviteEmail', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(remove).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('inviteJobOptions', () => {
+  it('pins the four attempts at 1, 2 and 4 minutes and the full token hash', () => {
+    const tokenHash = 'a'.repeat(64);
+    const options = inviteJobOptions('invitation-1', tokenHash);
+
+    // The initial attempt plus three retries: 1, 2 and 4 minutes (AC-3).
+    expect(options.attempts).toBe(4);
+    expect(options.backoff).toEqual({ type: 'exponential', delay: INVITE_JOB_BACKOFF_MS });
+    expect(INVITE_JOB_BACKOFF_MS).toBe(60_000);
+    // The whole hash identifies the job, so two different links can never
+    // collide on a shortened prefix.
+    expect(options.jobId).toBe(`invite-invitation-1-${tokenHash}`);
+    expect(options.removeOnComplete).toBe(true);
+    expect(options.removeOnFail).toBe(true);
   });
 });

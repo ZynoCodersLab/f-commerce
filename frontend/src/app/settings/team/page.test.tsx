@@ -102,6 +102,11 @@ describe('TeamPage', () => {
     expect(screen.getAllByText('Email sent').length).toBeGreaterThan(0);
     // The owner id is read in a deferred effect, so wait for the owner view.
     expect(await screen.findByRole('button', { name: /send invitation/i })).toBeDisabled();
+    // The self row explains why its role and remove controls are disabled
+    // instead of hiding the reason in a title, which keyboard users cannot reach.
+    expect(
+      (await screen.findAllByText(/cannot change your own role or remove yourself/i)).length,
+    ).toBeGreaterThan(0);
   });
 
   it('labels a queued invitation with its last attempt instead of not yet', async () => {
@@ -260,6 +265,35 @@ describe('TeamPage', () => {
     await user.click(screen.getByRole('button', { name: /send invitation/i }));
 
     expect(await screen.findByText(/already has a pending invitation/i)).toBeVisible();
+  });
+
+  it('explains a resend conflict without promising a link that is not shown', async () => {
+    setAuth({ accessToken: token({ userId: OWNER_ID }), businessId: 'biz-1' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (input: RequestInfo) => {
+        if (String(input).includes('/resend')) {
+          return jsonResponse(409, {
+            error: 'INVITE_RESEND_CONFLICT',
+            message: 'The invitation changed',
+          });
+        }
+        return jsonResponse(200, teamBody);
+      }),
+    );
+
+    render(
+      <ThemeBoundary>
+        <TeamPage />
+      </ThemeBoundary>,
+    );
+
+    const user = userEvent.setup();
+    const resendButtons = await screen.findAllByRole('button', { name: /resend/i });
+    await user.click(resendButtons[0]);
+
+    expect(await screen.findByText(/just resent from somewhere else/i)).toBeVisible();
+    expect(screen.queryByText(/newest link is below/i)).not.toBeInTheDocument();
   });
 
   it('clears the session when the API denies business access', async () => {

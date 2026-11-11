@@ -21,8 +21,9 @@ export function inviteJobOptions(invitationId: string, tokenHash: string): JobsO
     backoff: { type: 'exponential', delay: INVITE_JOB_BACKOFF_MS },
     removeOnComplete: true,
     removeOnFail: true,
-    // The same invitation and token never need a second copy in flight.
-    jobId: `invite-${invitationId}-${tokenHash.slice(0, 12)}`,
+    // The same invitation and token never need a second copy in flight. The
+    // full hash costs nothing here and removes any chance of a dedup collision.
+    jobId: `invite-${invitationId}-${tokenHash}`,
   };
 }
 

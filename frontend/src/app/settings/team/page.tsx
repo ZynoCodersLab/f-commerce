@@ -43,7 +43,7 @@ type LoadState = 'loading' | 'ready' | 'error';
 const POLL_INTERVAL_MS = 5_000;
 /** After the first minute, slow down so a stuck worker is cheap to watch. */
 const SLOW_POLL_INTERVAL_MS = 30_000;
-/** One minute of five second polls before backing off. */
+/** Twelve five second polls cover the first minute before backing off. */
 const FAST_POLLS = 12;
 
 const EMAIL_STATUS_LABEL: Record<TeamInvitation['emailStatus'], string> = {
@@ -171,7 +171,7 @@ export default function TeamPage() {
       timer = setTimeout(() => {
         if (cancelled) return;
         polls += 1;
-        void load().finally(() => {
+        void load(() => cancelled).finally(() => {
           if (!cancelled) schedule();
         });
       }, delay);
@@ -238,7 +238,7 @@ export default function TeamPage() {
         caught instanceof TeamApiError && caught.code === 'RATE_LIMITED'
           ? 'Too many invitations in the last hour. Try again later.'
           : caught instanceof TeamApiError && caught.code === 'INVITE_RESEND_CONFLICT'
-            ? 'This invitation was just resent from somewhere else. The newest link is below.'
+            ? 'This invitation was just resent from somewhere else, so that sender holds the newest link. Resend again if you need it here.'
             : 'Could not resend the invitation. Try again.',
       );
       setReloadKey((key) => key + 1);
@@ -683,15 +683,15 @@ function MemberActions({
         <option value="OWNER">Owner</option>
         <option value="STAFF">Staff</option>
       </Select>
-      <Button
-        disabled={busy || isSelf}
-        onClick={onRemove}
-        title={isSelf ? 'You cannot remove yourself' : undefined}
-        variant="quiet"
-      >
+      <Button disabled={busy || isSelf} onClick={onRemove} variant="quiet">
         <Trash2 aria-hidden={true} size={16} />
         Remove
       </Button>
+      {isSelf && (
+        <span className="basis-full text-xs text-body">
+          You cannot change your own role or remove yourself.
+        </span>
+      )}
     </div>
   );
 }

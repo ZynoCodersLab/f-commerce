@@ -1,13 +1,4 @@
-/** Everything the invitation email needs. The token is already in the link. */
-export interface InviteEmailContent {
-  to: string;
-  businessName: string;
-  inviterName: string;
-  role: 'OWNER' | 'STAFF';
-  inviteUrl: string;
-  expiresAt: Date;
-  replyTo?: string;
-}
+import type { InviteEmailContent } from '../../application/services/invite-email.port.js';
 
 /** Render a date in UTC, e.g. "1 November 2026 at 14:05 UTC". */
 export function formatExpiry(expiresAt: Date): string {
