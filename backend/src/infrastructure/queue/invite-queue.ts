@@ -86,6 +86,9 @@ export async function enqueueInviteEmail(data: InviteEmailJobData): Promise<bool
   } catch (error) {
     console.error('Could not queue an invitation email:', (error as Error).message);
     if (timedOut) {
+      // A job Redis accepted after the timeout is removed here. The window is
+      // narrow but real: until the caller marks the invitation's email failed,
+      // the worker could still pick the job up and send it.
       void added
         .then((job) => job.remove())
         .catch(() => {

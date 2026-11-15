@@ -145,21 +145,39 @@ export class RedisRateLimitStore implements Store {
   }
 }
 
+/** How long one rate limit command may wait for a connected Redis. */
+const RATE_LIMIT_COMMAND_TIMEOUT_MS = 500;
+
+/**
+ * Builds the Redis client used by the invitation limiters.
+ *
+ * Exported so the outage regression test can point it at an unreachable port
+ * and prove the store falls back without waiting for a reconnect.
+ */
+export function createRateLimitRedisClient(redisUrl: string): Redis {
+  return new Redis(redisUrl, {
+    maxRetriesPerRequest: 1,
+    enableReadyCheck: false,
+    // Never queue a command while disconnected. A queued command waits for the
+    // next reconnect, and the backoff below grows to ten seconds, so the rate
+    // limit check would delay the request it is meant to protect. The command
+    // fails at once, the store falls back to its in process counter, and the
+    // connection keeps retrying in the background.
+    enableOfflineQueue: false,
+    // A connected socket can still stop answering. Bound that wait as well, so
+    // a stalled Redis never holds an invitation request open.
+    commandTimeout: RATE_LIMIT_COMMAND_TIMEOUT_MS,
+    connectionName: 'f-commerce-rate-limit',
+    connectTimeout: 1_000,
+    retryStrategy: (attempt) => Math.min(attempt * 500, 10_000),
+  });
+}
+
 let sharedRedis: Redis | null = null;
 
 function redisClient(): Redis {
   if (!sharedRedis) {
-    sharedRedis = new Redis(config.REDIS_URL, {
-      maxRetriesPerRequest: 1,
-      enableReadyCheck: false,
-      connectionName: 'f-commerce-rate-limit',
-      // A command that cannot reach Redis fails after one retry, so the
-      // request falls through to the in process counter instead of waiting in
-      // an offline queue. The connection itself keeps retrying in the
-      // background on the strategy below, so a later request finds it healthy.
-      connectTimeout: 1_000,
-      retryStrategy: (attempt) => Math.min(attempt * 500, 10_000),
-    });
+    sharedRedis = createRateLimitRedisClient(config.REDIS_URL);
     sharedRedis.on('error', (error) => {
       console.error('Redis rate limit connection error:', error.message);
     });

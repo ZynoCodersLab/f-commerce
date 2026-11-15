@@ -113,7 +113,9 @@ export default function TeamPage() {
   }, [router]);
 
   // The signed in user's id comes from the access token, which only exists in
-  // the browser, so it is read once when the page opens.
+  // the browser, so it is read once when the page opens. It is set a frame
+  // later and only gates controls inside the ready state, so the loading
+  // skeleton never depends on it.
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       setCurrentUserId(getUserIdFromToken(getAuth()?.accessToken ?? null));

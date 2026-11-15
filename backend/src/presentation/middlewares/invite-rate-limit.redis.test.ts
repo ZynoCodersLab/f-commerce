@@ -59,6 +59,25 @@ async function clearPrefix(): Promise<void> {
   if (keys.length > 0) await redis.del(...keys);
 }
 
+/**
+ * The rate limit Redis client is created on the first request and does not
+ * queue commands while it is still connecting. Send previews until one lands
+ * in Redis so the shared counter cases start from a ready connection.
+ */
+async function waitForSharedLimiter(): Promise<void> {
+  const address = '198.51.100.250';
+  const key = `ratelimit:team-preview:${createHash('sha256')
+    .update(`ip:${address}`)
+    .digest('hex')}`;
+
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    await request(first).get('/preview').set('X-Forwarded-For', address);
+    if (await redis.exists(key)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('The shared rate limit client did not connect.');
+}
+
 beforeAll(async () => {
   redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: 1, connectTimeout: 1_000 });
   redisUp = await redis
@@ -71,6 +90,7 @@ beforeAll(async () => {
   }
   first = buildApp();
   second = buildApp();
+  await waitForSharedLimiter();
 });
 
 beforeEach(async () => {
@@ -261,21 +281,7 @@ describe('accept rate limiter', () => {
     expect(otherToken.status).toBe(200);
   });
 
-  it('caps a flood in this process once Redis stops answering', async () => {
-    if (!redisUp) return;
-    const ip = '198.51.100.63';
-
-    // A blocked client fails every command quickly, which is what an outage
-    // looks like to the store from the process that already holds a connection.
-    redis.disconnect();
-    redisUp = false;
-
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const response = await request(first).post('/accept').set('X-Forwarded-For', ip);
-      expect(response.status).toBe(200);
-    }
-
-    const blocked = await request(first).post('/accept').set('X-Forwarded-For', ip);
-    expect(blocked.status).toBe(429);
-  });
+  // The outage fallback is covered in invite-rate-limit.outage.test.ts with a
+  // client pointed at an unreachable port. Disconnecting the separate client
+  // above would not affect the limiter's shared connection.
 });
