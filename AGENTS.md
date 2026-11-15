@@ -87,6 +87,12 @@ Host agnostic. The frontend and the API deploy as two independent services to an
 - [vercel-optimize](.agents/skills/vercel-optimize/): `vercel-labs/agent-skills`, web performance optimization.
 - [web-design-guidelines](.agents/skills/web-design-guidelines/): `vercel-labs/agent-skills`, web design and accessibility guidance.
 - [writing-guidelines](.agents/skills/writing-guidelines/): `vercel-labs/agent-skills`, clear writing guidance.
+- [bullmq-specialist](.agents/skills/bullmq-specialist/): `sickn33/agentic-awesome-skills`, BullMQ queues, retries, and workers.
+- [redis-core](.agents/skills/redis-core/): `redis/agent-skills`, Redis data structures and key naming.
+- [redis-connections](.agents/skills/redis-connections/): `redis/agent-skills`, Redis client pooling, pipelining, and timeouts.
+- [redis-observability](.agents/skills/redis-observability/): `redis/agent-skills`, Redis metrics, slow commands, and incident triage.
+- [resend](.agents/skills/resend/): `resend/resend-skills`, the Resend email API, inbound webhooks, and templates.
+- [email-best-practices](.agents/skills/email-best-practices/): `resend/email-best-practices`, deliverability, auth records, and compliance.
 
 MCP servers: `@modelcontextprotocol/server-postgres` (recommended), `@modelcontextprotocol/server-git` (recommended). Host-specific MCP servers, such as `https://mcp.vercel.com`, are optional and only useful when that host is the chosen target.
 

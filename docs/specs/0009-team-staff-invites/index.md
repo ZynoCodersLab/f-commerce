@@ -1,7 +1,7 @@
 # 0009. Team and staff invites
 
 **Date**: 2026-11-01
-**Status**: In Progress
+**Status**: Accepted
 
 ## Summary
 
