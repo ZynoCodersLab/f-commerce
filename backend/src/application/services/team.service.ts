@@ -15,6 +15,7 @@ import {
   TeamMemberRecord,
 } from '../../domain/repositories/team.repository.js';
 import { Invitation } from '../../domain/entities/invitation.entity.js';
+import { normaliseEmail } from '../../domain/email.js';
 import {
   EmailMismatchError,
   InviteAlreadyAcceptedError,
@@ -109,10 +110,6 @@ function toInvitationDto(invitation: TeamInvitationRecord, now: Date): TeamInvit
     // Only a failed send carries a reason the screen may show.
     emailError: invitation.emailStatus === 'FAILED' ? (invitation.lastEmailError ?? null) : null,
   };
-}
-
-function normaliseEmail(email: string): string {
-  return email.trim().toLowerCase();
 }
 
 /**

@@ -6,14 +6,11 @@ import { config } from '../../infrastructure/config.js';
 import { User } from '../../domain/entities/user.entity.js';
 import { DuplicateEmailError, UnauthorizedError, NotFoundError } from '../../domain/errors.js';
 import { isUniqueViolation } from './database-errors.js';
+import { normaliseEmail } from '../../domain/email.js';
 
 export interface AuthTokens {
   accessToken: string;
   refreshToken: string;
-}
-
-function normaliseEmail(email: string): string {
-  return email.trim().toLowerCase();
 }
 
 export class AuthService {

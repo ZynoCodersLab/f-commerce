@@ -3,10 +3,7 @@ import { getDb } from '../client.js';
 import { users, businesses, businessMembers, refreshTokens } from '../schema.js';
 import type { User } from '../../../../domain/entities/user.entity.js';
 import { IAuthRepository } from '../../../../domain/repositories/auth.repository.js';
-
-function normaliseEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
+import { normaliseEmail } from '../../../../domain/email.js';
 
 function toUser(row: typeof users.$inferSelect): User {
   return {

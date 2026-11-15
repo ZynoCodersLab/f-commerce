@@ -2,6 +2,7 @@ import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../client.js';
 import { auditLogs, businessMembers, businesses, invitations, users } from '../schema.js';
 import { isUuid } from '../../../../domain/uuid.js';
+import { normaliseEmail } from '../../../../domain/email.js';
 import {
   AcceptResult,
   ITeamRepository,
@@ -47,10 +48,6 @@ function toInvitation(row: InvitationRow): Invitation {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
-}
-
-function normaliseEmail(email: string): string {
-  return email.trim().toLowerCase();
 }
 
 /**
@@ -672,17 +669,17 @@ export class DrizzleTeamRepository implements ITeamRepository {
       const email = normaliseEmail(lockedRow.email);
       const role: InvitationRole = lockedRow.role === 'OWNER' ? 'OWNER' : 'STAFF';
       let userId = input.existingUserId;
-      const requestedName = input.requestedName?.trim();
+      const trimmedRequestedName = input.requestedName?.trim();
       // The body name wins, then a non blank stored name, then the caller's
       // fallback (the invitation address local part).
-      let name = requestedName || input.name;
+      let name = trimmedRequestedName || input.name;
 
       if (userId) {
         const row = (
           await tx.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1)
         )[0];
         const storedName = row?.name.trim() ?? '';
-        name = requestedName || storedName || input.name;
+        name = trimmedRequestedName || storedName || input.name;
 
         const changes: { name?: string; passwordHash?: string; updatedAt: Date } = {
           updatedAt: now,
@@ -697,7 +694,7 @@ export class DrizzleTeamRepository implements ITeamRepository {
           .insert(users)
           .values({
             email,
-            name: requestedName || input.name,
+            name: trimmedRequestedName || input.name,
             passwordHash: input.passwordHash ?? null,
             oauth: [],
             isActive: true,
