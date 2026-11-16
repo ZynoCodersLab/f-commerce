@@ -78,9 +78,13 @@ test.describe('team and staff invites', () => {
     const inviteUrl = (await link.textContent())?.trim() ?? '';
     expect(inviteUrl).toMatch(/\/invite\/[A-Za-z0-9_-]{43}$/);
 
-    // The invitee is listed with a status word, not just a colour.
+    // The invitee is listed with a status word, not just a colour. Read the
+    // visible copy: the desktop table and the mobile card grid stay mounted
+    // together, so an unscoped .first() can resolve the hidden row and fail.
     await expect(page.getByText(invitee).filter({ visible: true }).first()).toBeVisible();
-    await expect(page.getByText(/not emailed|sending|email sent/i).first()).toBeVisible();
+    await expect(
+      page.getByText(/^(not emailed|sending|email sent)$/i).filter({ visible: true }).first(),
+    ).toBeVisible();
 
     // The public page describes the invitation before asking for a password.
     // A fresh context keeps the owner's session out of the invitee's browser.
