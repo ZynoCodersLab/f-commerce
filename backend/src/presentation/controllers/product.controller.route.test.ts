@@ -1357,11 +1357,17 @@ describe('product and category routes against PostgreSQL', () => {
       const id: string = created.body.data.id;
 
       // A membership whose user row is absent, so the audit write fails.
+      // DISABLE TRIGGER ALL leaves foreign-key triggers in place, so drop the
+      // guard with the session setting that genuinely bypasses referential
+      // integrity and restore it before the next test.
       const pool = getTestPool();
       await seedMembership(BIZ, BROKEN_AUDIT_USER, 'OWNER');
-      await pool.query('ALTER TABLE "business_members" DISABLE TRIGGER ALL');
-      await pool.query('DELETE FROM users WHERE id = $1', [BROKEN_AUDIT_USER]);
-      await pool.query('ALTER TABLE "business_members" ENABLE TRIGGER ALL');
+      await pool.query('SET session_replication_role = replica');
+      try {
+        await pool.query('DELETE FROM users WHERE id = $1', [BROKEN_AUDIT_USER]);
+      } finally {
+        await pool.query('SET session_replication_role = origin');
+      }
 
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       try {
