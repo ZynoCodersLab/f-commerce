@@ -14,6 +14,10 @@ import { customerRouter } from './presentation/controllers/customer.controller.j
 import { orderRouter } from './presentation/controllers/order.controller.js';
 import { categoryRouter } from './presentation/controllers/category.controller.js';
 import { productRouter } from './presentation/controllers/product.controller.js';
+import { invitationRouter, teamRouter } from './presentation/controllers/team.controller.js';
+import { closeInviteQueue } from './infrastructure/queue/invite-queue.js';
+import { handleUnhandledError } from './presentation/middlewares/error-handler.middleware.js';
+import { closeRateLimitStore } from './presentation/middlewares/invite-rate-limit.middleware.js';
 import {
   globalRateLimiter,
   loginAccountRateLimiter,
@@ -55,6 +59,8 @@ app.use('/api/customers', customerRouter);
 app.use('/api/orders', orderRouter);
 app.use('/api/categories', categoryRouter);
 app.use('/api/products', productRouter);
+app.use('/api/team', teamRouter);
+app.use('/api/invitations', invitationRouter);
 
 app.get('/health', (_request, response) => {
   response.status(200).json({
@@ -63,6 +69,10 @@ app.get('/health', (_request, response) => {
     message: 'Backend is healthy',
   });
 });
+
+// Registered after every route so a failure a middleware forwards with
+// next(error) answers with the API's JSON envelope, not Express's default page.
+app.use(handleUnhandledError);
 
 /** Stop accepting connections and close the pool when the host stops the process. */
 function installShutdownHandlers(server: Server): void {
@@ -83,10 +93,18 @@ function installShutdownHandlers(server: Server): void {
 
     server.closeIdleConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    try {
-      await closeDatabase();
-    } catch (error) {
-      console.error('Failed to close the database pool:', error);
+    // The queue and the rate limit store hold Redis connections, so they close
+    // with the database pool before the process exits.
+    for (const [label, close] of [
+      ['invite queue', closeInviteQueue],
+      ['rate limit store', closeRateLimitStore],
+      ['database', closeDatabase],
+    ] as const) {
+      try {
+        await close();
+      } catch (error) {
+        console.error(`Failed to close the ${label}:`, error);
+      }
     }
     console.log('Shutdown complete');
     process.exitCode = 0;
@@ -103,8 +121,9 @@ async function startServer(): Promise<void> {
   } catch (error) {
     console.error('Failed to connect to database:', error);
     await closeDatabase().catch(() => undefined);
-    process.exitCode = 1;
-    return;
+    // Leave now instead of setting exitCode: a failed pool keeps a retry timer
+    // alive, which would keep the process running without ever listening.
+    process.exit(1);
   }
 
   const server = app.listen(port, () => {

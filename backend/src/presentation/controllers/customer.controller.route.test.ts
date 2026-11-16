@@ -14,7 +14,12 @@ import {
   auditLogs,
 } from '../../infrastructure/database/drizzle/schema.js';
 import { OrderStatus } from '../../domain/entities/order.entity.js';
-import { startPg, stopPg, resetDatabase } from '../../test-support/pg-test-database.js';
+import {
+  startPg,
+  stopPg,
+  resetDatabase,
+  seedMembership,
+} from '../../test-support/pg-test-database.js';
 
 const app = express();
 app.use(express.json());
@@ -148,6 +153,8 @@ describe('customer routes against PostgreSQL', () => {
     await resetDatabase();
     await seedBusiness(BIZ);
     await seedBusiness(OTHER_BIZ);
+    await seedMembership(BIZ, OWNER, 'OWNER');
+    await seedMembership(BIZ, STAFF, 'STAFF');
   });
 
   describe('happy path (AC-1, AC-4, AC-5, AC-6, AC-7)', () => {

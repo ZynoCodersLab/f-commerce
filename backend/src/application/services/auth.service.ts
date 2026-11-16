@@ -4,12 +4,9 @@ import { randomBytes } from 'node:crypto';
 import { IAuthRepository } from '../../domain/repositories/auth.repository.js';
 import { config } from '../../infrastructure/config.js';
 import { User } from '../../domain/entities/user.entity.js';
-import {
-  DuplicateEmailError,
-  UnauthorizedError,
-  ConflictError,
-  NotFoundError,
-} from '../../domain/errors.js';
+import { DuplicateEmailError, UnauthorizedError, NotFoundError } from '../../domain/errors.js';
+import { isUniqueViolation } from './database-errors.js';
+import { normaliseEmail } from '../../domain/email.js';
 
 export interface AuthTokens {
   accessToken: string;
@@ -21,25 +18,35 @@ export class AuthService {
 
   async register(
     email: string,
-    passwordHash: string,
+    password: string,
     name: string,
     businessName: string,
   ): Promise<AuthTokens> {
+    email = normaliseEmail(email);
     const existingUser = await this.authRepository.findUserByEmail(email);
     if (existingUser) {
       throw new DuplicateEmailError('Email already exists');
     }
 
     const salt = await bcrypt.genSalt(10);
-    const hashed = await bcrypt.hash(passwordHash, salt);
+    const hashed = await bcrypt.hash(password, salt);
 
-    const user = await this.authRepository.createUser({
-      email,
-      passwordHash: hashed,
-      name,
-      oauth: [],
-      isActive: true,
-    });
+    let user: User;
+    try {
+      user = await this.authRepository.createUser({
+        email,
+        passwordHash: hashed,
+        name,
+        oauth: [],
+        isActive: true,
+      });
+    } catch (error) {
+      // Two registrations for the same address, in different letter cases, can
+      // both pass the check above and collide on the lower email unique index.
+      // The loser answers 409, not an opaque 500.
+      if (isUniqueViolation(error)) throw new DuplicateEmailError('Email already exists');
+      throw error;
+    }
 
     const business = await this.authRepository.createBusiness(businessName);
 
@@ -53,13 +60,13 @@ export class AuthService {
     return this.generateTokens(user.id, [{ businessId: business._id, role: 'OWNER' }]);
   }
 
-  async login(email: string, passwordHash: string): Promise<AuthTokens> {
-    const user = await this.authRepository.findUserByEmail(email);
+  async login(email: string, password: string): Promise<AuthTokens> {
+    const user = await this.authRepository.findUserByEmail(normaliseEmail(email));
     if (!user || !user.passwordHash) {
       throw new UnauthorizedError('Invalid credentials');
     }
 
-    const isValid = await bcrypt.compare(passwordHash, user.passwordHash);
+    const isValid = await bcrypt.compare(password, user.passwordHash);
     if (!isValid) {
       throw new UnauthorizedError('Invalid credentials');
     }
@@ -73,6 +80,7 @@ export class AuthService {
     provider: string,
     providerId: string,
   ): Promise<AuthTokens> {
+    email = normaliseEmail(email);
     let user = await this.authRepository.findUserByEmail(email);
 
     if (user) {
@@ -85,12 +93,19 @@ export class AuthService {
         user.oauth = updatedOauth;
       }
     } else {
-      user = await this.authRepository.createUser({
-        email,
-        name,
-        oauth: [{ provider, providerId }],
-        isActive: true,
-      });
+      try {
+        user = await this.authRepository.createUser({
+          email,
+          name,
+          oauth: [{ provider, providerId }],
+          isActive: true,
+        });
+      } catch (error) {
+        // The same address can race two first time OAuth logins; the loser sees
+        // the existing account conflict instead of a 500.
+        if (isUniqueViolation(error)) throw new DuplicateEmailError('Email already exists');
+        throw error;
+      }
 
       const business = await this.authRepository.createBusiness(`${name}'s Business`);
 
@@ -105,19 +120,47 @@ export class AuthService {
     return this.createTokensForUser(user);
   }
 
+  /**
+   * Tokens carry active memberships only. A removed member keeps a valid login
+   * but no business claim, and a refresh rebuilds the claim list from the
+   * database, so a stale access token never outlives the membership behind it.
+   */
   private async createTokensForUser(user: User): Promise<AuthTokens> {
-    const members = (await this.authRepository.findUserBusinesses(user.id)) as {
+    const memberships = await this.activeMemberships(user.id);
+    return this.generateTokens(user.id, memberships);
+  }
+
+  private async activeMemberships(
+    userId: string,
+  ): Promise<{ businessId: string; role: 'OWNER' | 'STAFF' }[]> {
+    const members = (await this.authRepository.findUserBusinesses(userId)) as {
       businessId: string | { _id: string };
       role: string;
+      status?: string;
     }[];
-    const memberships = members.map((m) => ({
-      businessId: (m.businessId as Record<string, unknown>)._id
-        ? String((m.businessId as Record<string, unknown>)._id)
-        : String(m.businessId),
-      role: m.role,
-    }));
 
-    return this.generateTokens(user.id, memberships);
+    return members
+      .filter((m) => m.status === 'ACTIVE')
+      .map((m) => ({
+        businessId: (m.businessId as Record<string, unknown>)._id
+          ? String((m.businessId as Record<string, unknown>)._id)
+          : String(m.businessId),
+        role: m.role === 'OWNER' ? 'OWNER' : 'STAFF',
+      }));
+  }
+
+  /**
+   * Tokens for a member who just accepted an invitation. That business is put
+   * first so the client lands in it even when the account already belonged to
+   * another one.
+   */
+  async issueTokensForUser(userId: string, preferredBusinessId: string): Promise<AuthTokens> {
+    const memberships = await this.activeMemberships(userId);
+    // Put the just accepted business first and keep the remaining order as the
+    // database returned it, instead of relying on a non total sort comparator.
+    const preferred = memberships.filter((m) => m.businessId === preferredBusinessId);
+    const rest = memberships.filter((m) => m.businessId !== preferredBusinessId);
+    return this.generateTokens(userId, [...preferred, ...rest]);
   }
 
   private async generateTokens(
@@ -166,34 +209,19 @@ export class AuthService {
     const user = await this.authRepository.findUserById(userId);
     if (!user) throw new NotFoundError('User not found');
 
-    const businesses = await this.authRepository.findUserBusinesses(userId);
+    // Only active memberships reach the client, matching the token path. A
+    // removed member keeps a valid login but must not see a business they can no
+    // longer open, so a future consumer of `businesses` cannot leak one either.
+    const memberships = (await this.authRepository.findUserBusinesses(userId)) as {
+      businessId: string | { _id: string };
+      role: string;
+      status?: string;
+    }[];
+    const businesses = memberships.filter((membership) => membership.status === 'ACTIVE');
+
     return {
       user: { id: user.id, email: user.email, name: user.name, isActive: user.isActive },
       businesses,
     };
-  }
-
-  async inviteStaff(email: string, role: 'OWNER' | 'STAFF', businessId: string): Promise<void> {
-    let user = await this.authRepository.findUserByEmail(email);
-    if (!user) {
-      user = await this.authRepository.createUser({
-        email,
-        name: 'Pending Invite',
-        oauth: [],
-        isActive: false,
-      });
-    }
-
-    const existingMember = await this.authRepository.findBusinessMember(businessId, user.id);
-    if (existingMember) {
-      throw new ConflictError('User is already a member or invited to this business');
-    }
-
-    await this.authRepository.createBusinessMember({
-      businessId,
-      userId: user.id,
-      role,
-      status: 'INVITED',
-    });
   }
 }

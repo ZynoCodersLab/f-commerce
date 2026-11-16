@@ -1,10 +1,17 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
-import { getAuth } from '@/lib/auth-client';
+import { getAuth, subscribeToAuth } from '@/lib/auth-client';
 
 function subscribeToSession(onChange: () => void): () => void {
+  // The auth store covers changes made in this tab, such as clearing the
+  // session after a BUSINESS_ACCESS_DENIED response. The storage event covers
+  // another tab. Together the guard redirects on both.
+  const unsubscribeAuth = subscribeToAuth(onChange);
   window.addEventListener('storage', onChange);
-  return () => window.removeEventListener('storage', onChange);
+  return () => {
+    unsubscribeAuth();
+    window.removeEventListener('storage', onChange);
+  };
 }
 
 interface RequireAuthOptions {
@@ -18,6 +25,12 @@ interface RequireAuthOptions {
    * Ignored for protected routes, which always go to `/login`.
    */
   redirectTo?: string | (() => string | Promise<string>);
+  /**
+   * true (default) sends an authenticated visitor away from a public route.
+   * Set false for a public route that must also serve signed in visitors, such
+   * as the invitation page: the session is read, but nobody is redirected.
+   */
+  redirectAuthenticated?: boolean;
 }
 
 /**
@@ -37,6 +50,7 @@ interface RequireAuthOptions {
 export function useRequireAuth(options?: RequireAuthOptions): boolean {
   const requireAuth = options?.requireAuth ?? true;
   const redirectTo = options?.redirectTo;
+  const redirectAuthenticated = options?.redirectAuthenticated ?? true;
   const router = useRouter();
   const authed = useSyncExternalStore<boolean | null>(
     subscribeToSession,
@@ -44,7 +58,8 @@ export function useRequireAuth(options?: RequireAuthOptions): boolean {
     () => null,
   );
 
-  const shouldRedirect = authed !== null && (requireAuth ? !authed : authed);
+  const shouldRedirect =
+    authed !== null && (requireAuth ? !authed : redirectAuthenticated && authed);
 
   useEffect(() => {
     if (!shouldRedirect) return;

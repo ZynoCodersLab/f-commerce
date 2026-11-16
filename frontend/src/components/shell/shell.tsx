@@ -12,6 +12,7 @@ import {
   Settings,
   ShoppingBag,
   Users,
+  UsersRound,
 } from 'lucide-react';
 import NextLink from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -42,7 +43,10 @@ const routes: RouteItem[] = [
   { href: '/products', label: 'Products', icon: Package },
 ];
 
-const secondaryRoutes: RouteItem[] = [{ href: '/settings', label: 'Settings', icon: Settings }];
+const secondaryRoutes: RouteItem[] = [
+  { href: '/settings', label: 'Settings', icon: Settings },
+  { href: '/settings/team', label: 'Team', icon: UsersRound },
+];
 
 function isRouteActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);

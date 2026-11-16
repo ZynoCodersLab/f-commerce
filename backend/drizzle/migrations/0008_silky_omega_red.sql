@@ -1,0 +1,1 @@
+ALTER TABLE "invitations" ALTER COLUMN "last_sent_at" SET DEFAULT now();

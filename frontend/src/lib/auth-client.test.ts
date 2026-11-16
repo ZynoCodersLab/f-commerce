@@ -5,6 +5,7 @@ import {
   clearAuth,
   getAuth,
   getAuthHeaders,
+  getUserIdFromToken,
   isTimeoutError,
   setAuth,
   subscribeToAuth,
@@ -102,6 +103,30 @@ describe('auth-client', () => {
     });
   });
 
+  describe('getUserIdFromToken', () => {
+    // A JWT segment is base64url and usually unpadded, which bare atob rejects.
+    function tokenFor(payload: object): string {
+      const segment = btoa(JSON.stringify(payload))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+      return `header.${segment}.signature`;
+    }
+
+    it('reads the user id from an unpadded base64url payload', () => {
+      expect(getUserIdFromToken(tokenFor({ userId: 'user-42' }))).toBe('user-42');
+    });
+
+    it('returns null when the token has no user id', () => {
+      expect(getUserIdFromToken(tokenFor({ memberships: [] }))).toBeNull();
+    });
+
+    it('returns null for a token that cannot be decoded', () => {
+      expect(getUserIdFromToken('not-a-jwt')).toBeNull();
+      expect(getUserIdFromToken(null)).toBeNull();
+    });
+  });
+
   describe('apiFetch', () => {
     it('passes relative paths through to fetch for the Next.js rewrite to handle', async () => {
       setAuth({ accessToken: 'tok', businessId: 'biz-1' });
@@ -162,6 +187,52 @@ describe('auth-client', () => {
       await apiFetch('https://example.com/path');
 
       expect(fetchMock).toHaveBeenCalledWith('https://example.com/path', expect.anything());
+    });
+
+    // covers AC-15: a removed member loses the session on the next business request.
+    it('clears the session when the API denies access by membership', async () => {
+      setAuth({ accessToken: 'tok', businessId: 'biz-1' });
+      const listener = vi.fn();
+      const unsubscribe = subscribeToAuth(listener);
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response(JSON.stringify({ error: 'BUSINESS_ACCESS_DENIED' }), { status: 403 }),
+          ),
+      );
+
+      const response = await apiFetch('/api/orders');
+
+      // The caller still gets the untouched response to report.
+      expect(response.status).toBe(403);
+      expect(getAuth()).toBeNull();
+      expect(listener).toHaveBeenCalledTimes(1);
+      unsubscribe();
+    });
+
+    it('keeps the session for another 403', async () => {
+      setAuth({ accessToken: 'tok', businessId: 'biz-1' });
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn()
+          .mockResolvedValue(new Response(JSON.stringify({ error: 'FORBIDDEN' }), { status: 403 })),
+      );
+
+      await apiFetch('/api/orders');
+
+      expect(getAuth()).toEqual({ accessToken: 'tok', businessId: 'biz-1' });
+    });
+
+    it('keeps the session when a 403 body is not JSON', async () => {
+      setAuth({ accessToken: 'tok', businessId: 'biz-1' });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('denied', { status: 403 })));
+
+      await apiFetch('/api/orders');
+
+      expect(getAuth()).toEqual({ accessToken: 'tok', businessId: 'biz-1' });
     });
   });
 

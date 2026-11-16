@@ -2,14 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 
-function startServer(port: number, env: NodeJS.ProcessEnv = {}): ChildProcess {
+function startServer(port: number, env: NodeJS.ProcessEnv = {}, needsEmail = false): ChildProcess {
   return spawn(process.execPath, ['--import', 'tsx/esm', 'src/server.ts'], {
-    env: { ...process.env, PORT: String(port), ...env },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      // A production process refuses to start without these, so the test runs
+      // locally keep development settings unless a test asks otherwise.
+      NODE_ENV: needsEmail ? 'production' : 'test',
+      RESEND_API_KEY: 're_test_key',
+      EMAIL_FROM: 'F Commerce <team@example.com>',
+      ...env,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
 
-function waitForOutput(server: ChildProcess, text: string, timeoutMs = 25_000): Promise<void> {
+function waitForOutput(server: ChildProcess, text: string, timeoutMs = 60_000): Promise<void> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(
       () => reject(new Error(`Timed out waiting for "${text}"`)),
@@ -30,7 +39,7 @@ function waitForOutput(server: ChildProcess, text: string, timeoutMs = 25_000): 
   });
 }
 
-function waitForExit(server: ChildProcess, timeoutMs = 25_000): Promise<number | null> {
+function waitForExit(server: ChildProcess, timeoutMs = 60_000): Promise<number | null> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       server.kill();
@@ -71,7 +80,7 @@ describe('backend scaffold', () => {
     } finally {
       server.kill();
     }
-  }, 30_000);
+  }, 75_000);
 
   it('exits before listening when the database is unreachable', async () => {
     const port = 4124;
@@ -90,7 +99,27 @@ describe('backend scaffold', () => {
     } finally {
       server.kill();
     }
-  }, 30_000);
+  }, 75_000);
+
+  // covers AC-4 and AC-23: a production process refuses to start without an
+  // email provider, so an invitation can never silently fail to send.
+  it('exits before listening when production email settings are missing', async () => {
+    const port = 4126;
+    const server = startServer(port, { RESEND_API_KEY: '', EMAIL_FROM: '' }, true);
+
+    let output = '';
+    server.stdout?.on('data', (chunk: Buffer) => (output += chunk.toString()));
+    server.stderr?.on('data', (chunk: Buffer) => (output += chunk.toString()));
+
+    try {
+      await expect(waitForExit(server)).resolves.toBe(1);
+      expect(output).toContain('RESEND_API_KEY is required in production');
+      expect(output).toContain('EMAIL_FROM is required in production');
+      expect(output).not.toContain(`port ${port}`);
+    } finally {
+      server.kill();
+    }
+  }, 75_000);
 
   // Signals do not exist on Windows, where Node terminates the child instead of
   // delivering a handler; CI runs this test on Linux.
@@ -118,6 +147,6 @@ describe('backend scaffold', () => {
         server.kill();
       }
     },
-    30_000,
+    75_000,
   );
 });

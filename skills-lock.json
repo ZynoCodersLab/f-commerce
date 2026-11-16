@@ -13,6 +13,12 @@
       "skillPath": "skills/audit/SKILL.md",
       "computedHash": "f388e74b95dcfea40615dcce28223b9166e9213867ac35e9971b549b7cda1eae"
     },
+    "bullmq-specialist": {
+      "source": "sickn33/agentic-awesome-skills",
+      "sourceType": "github",
+      "skillPath": "skills/bullmq-specialist/SKILL.md",
+      "computedHash": "8fbea5608a7f0e42126e18cc147f547e838292ab822022ebac2e342352758a2d"
+    },
     "check": {
       "source": "jsmastery-pro/skills",
       "sourceType": "github",
@@ -48,6 +54,18 @@
       "sourceType": "github",
       "skillPath": "lucide-icons/SKILL.md",
       "computedHash": "73228ea1c3b27bde65735896ea53c7de8c1ed1f25838429bbca64415c0b6c257"
+    },
+    "redis-core": {
+      "source": "redis/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/redis-core/SKILL.md",
+      "computedHash": "7805229f286490b074aa105bc9650060202e247764f09102b928421789380b63"
+    },
+    "redis-observability": {
+      "source": "redis/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/redis-observability/SKILL.md",
+      "computedHash": "7cb1ae455d4de8a51d5b819811a562140327af71690d3ba965431b056a452bdc"
     },
     "scope": {
       "source": "jsmastery-pro/skills",

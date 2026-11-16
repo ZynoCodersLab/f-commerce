@@ -62,6 +62,7 @@ import {
   startPg,
   stopPg,
   resetDatabase,
+  seedMembership,
   getTestPool,
 } from '../../test-support/pg-test-database.js';
 
@@ -75,7 +76,7 @@ const OTHER_BIZ = '00000000-0000-0000-0000-0000000000b2';
 const OWNER = '00000000-0000-0000-0000-0000000000c3';
 const STAFF = '00000000-0000-0000-0000-0000000000d4';
 const OUTSIDER = '00000000-0000-0000-0000-0000000000e5';
-const BROKEN_AUDIT_USER = 'not-a-uuid';
+const BROKEN_AUDIT_USER = '00000000-0000-0000-0000-0000000000f6';
 
 function tokenFor(
   userId: string,
@@ -240,6 +241,9 @@ describe('product and category routes against PostgreSQL', () => {
     await resetDatabase();
     await seedBusiness(BIZ);
     await seedBusiness(OTHER_BIZ);
+    await seedMembership(BIZ, OWNER, 'OWNER');
+    await seedMembership(BIZ, STAFF, 'STAFF');
+    await seedMembership(OTHER_BIZ, OUTSIDER, 'OWNER');
   });
 
   describe('categories (AC-3, AC-12, AC-13)', () => {
@@ -1352,6 +1356,28 @@ describe('product and category routes against PostgreSQL', () => {
       const created = await createProductViaApi(productBody(categoryId, { name: 'Audit Fail' }));
       const id: string = created.body.data.id;
 
+      // A real membership for the actor, so auth passes, plus a trigger that
+      // rejects only this actor's audit rows. The product update would succeed,
+      // so a 500 here proves the audit insert is in the same transaction and
+      // takes the update down with it. No foreign key is bypassed, which keeps
+      // the test honest for a least-privilege role.
+      await seedMembership(BIZ, BROKEN_AUDIT_USER, 'OWNER');
+      const pool = getTestPool();
+      await pool.query(`
+        CREATE FUNCTION reject_broken_audit() RETURNS trigger AS $$
+        BEGIN
+          IF NEW.user_id = '${BROKEN_AUDIT_USER}'::uuid THEN
+            RAISE EXCEPTION 'forced audit failure for %', NEW.user_id;
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql
+      `);
+      await pool.query(`
+        CREATE TRIGGER reject_broken_audit BEFORE INSERT ON "audit_logs"
+        FOR EACH ROW EXECUTE FUNCTION reject_broken_audit()
+      `);
+
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       try {
         const failed = await request(app)
@@ -1365,6 +1391,10 @@ describe('product and category routes against PostgreSQL', () => {
         });
       } finally {
         errorSpy.mockRestore();
+        // The trigger must go even if the request threw; dropping it does not
+        // drop its function, so remove both before the next test runs.
+        await pool.query('DROP TRIGGER IF EXISTS reject_broken_audit ON "audit_logs"');
+        await pool.query('DROP FUNCTION IF EXISTS reject_broken_audit()');
       }
 
       const stored = await findProductRow(id);

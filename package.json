@@ -13,7 +13,7 @@
     "npm": ">=11 <12"
   },
   "scripts": {
-    "dev": "concurrently -k -n frontend,backend -c blue,green \"npm run dev --workspace @f-commerce/frontend\" \"npm run dev --workspace @f-commerce/backend\"",
+    "dev": "concurrently -k -n frontend,backend,worker -c blue,green,magenta \"npm run dev --workspace @f-commerce/frontend\" \"npm run dev --workspace @f-commerce/backend\" \"npm run dev:worker --workspace @f-commerce/backend\"",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",

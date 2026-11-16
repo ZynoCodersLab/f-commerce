@@ -7,7 +7,7 @@ const optionalUrl = z.preprocess(
   z.string().url().optional(),
 );
 
-const envSchema = z.object({
+export const envSchema = z.object({
   NODE_ENV: z.string().default('development'),
   PORT: z.string().default('4000'),
   DATABASE_URL: z
@@ -27,6 +27,18 @@ const envSchema = z.object({
   CLOUDINARY_API_KEY: z.string().default(''),
   CLOUDINARY_API_SECRET: z.string().default(''),
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
+  // Public origin of the web app. Invite links are built from it, so a wrong
+  // value sends every invitation to the wrong place.
+  APP_ORIGIN: z.string().url().default('http://localhost:3000'),
+  RESEND_API_KEY: z.string().optional(),
+  // The sender line invitations arrive from, for example
+  // "F Commerce <team@example.com>". A development machine may leave it unset
+  // and fall back to the sandbox sender in resend-email.service.ts; production
+  // requires a real one, which productionEmailProblems enforces below. Deliberately
+  // no default here, or the value would be filled in before the guard could see
+  // it missing and the production check would never fire.
+  EMAIL_FROM: z.preprocess((value) => (value === '' ? undefined : value), z.string().optional()),
+  EMAIL_REPLY_TO: z.string().optional(),
   // Test-only escape hatch for end-to-end suites that create many accounts
   // from one IP. The rate-limit middleware ignores it in production.
   RATE_LIMIT_DISABLED: z
@@ -39,6 +51,65 @@ const parsed = envSchema.safeParse(process.env);
 
 if (!parsed.success) {
   console.error('Invalid environment variables:', parsed.error.format());
+  process.exit(1);
+}
+
+/**
+ * A development machine may run without an email provider, and the worker then
+ * records every invitation as skipped. A deployment may not: an invitation that
+ * silently never sends is worse than a server that refuses to start.
+ */
+export function productionEmailProblems(env: {
+  NODE_ENV: string;
+  RESEND_API_KEY?: string;
+  EMAIL_FROM?: string;
+}): string[] {
+  if (env.NODE_ENV !== 'production') return [];
+  const problems: string[] = [];
+  if (!env.RESEND_API_KEY?.trim()) {
+    problems.push('RESEND_API_KEY is required in production.');
+  }
+  if (!env.EMAIL_FROM?.trim()) {
+    problems.push('EMAIL_FROM is required in production.');
+  }
+  return problems;
+}
+
+/**
+ * Invite links are built from APP_ORIGIN, so a deployment that forgot it would
+ * email a link nobody can open while every request still looks healthy. Require
+ * an explicit, non localhost origin in production; development and test keep the
+ * localhost default.
+ */
+export function productionAppOriginProblems(env: {
+  NODE_ENV: string;
+  APP_ORIGIN: string;
+}): string[] {
+  if (env.NODE_ENV !== 'production') return [];
+  let hostname: string;
+  try {
+    hostname = new URL(env.APP_ORIGIN).hostname;
+  } catch {
+    return ['APP_ORIGIN must be a valid URL in production.'];
+  }
+  if (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '::1' ||
+    hostname === '[::1]'
+  ) {
+    return ['APP_ORIGIN must not point at localhost in production.'];
+  }
+  return [];
+}
+
+const problems = [
+  ...productionEmailProblems(parsed.data),
+  ...productionAppOriginProblems(parsed.data),
+];
+
+if (problems.length > 0) {
+  console.error('Invalid environment variables:', problems.join(' '));
   process.exit(1);
 }
 

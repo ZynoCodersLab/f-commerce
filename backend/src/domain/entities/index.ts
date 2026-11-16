@@ -8,3 +8,4 @@ export * from './inventory.entity.js';
 export * from './financial.entity.js';
 export * from './courier.entity.js';
 export * from './audit.entity.js';
+export * from './invitation.entity.js';

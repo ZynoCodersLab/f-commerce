@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import * as schema from '../infrastructure/database/drizzle/schema.js';
+import { businesses, businessMembers, users } from '../infrastructure/database/drizzle/schema.js';
 import { setTestDb, resetTestDb } from '../infrastructure/database/drizzle/client.js';
 import type { DbType } from '../infrastructure/database/drizzle/client.js';
 
@@ -92,6 +93,33 @@ export async function resetDatabase(): Promise<void> {
   if (tables !== '') {
     await pool.query(`TRUNCATE TABLE ${tables} RESTART IDENTITY CASCADE`);
   }
+}
+
+/**
+ * Store the user and membership rows that the auth middleware reads on every
+ * business request. Route tests sign their own tokens, so without these rows
+ * every request would be refused with BUSINESS_ACCESS_DENIED.
+ */
+export async function seedMembership(
+  businessId: string,
+  userId: string,
+  role: 'OWNER' | 'STAFF',
+  options: { status?: 'ACTIVE' | 'INVITED' | 'REMOVED' } = {},
+): Promise<void> {
+  if (!drizzleDb) throw new Error('Postgres test database is not started');
+
+  await drizzleDb
+    .insert(businesses)
+    .values({ id: businessId, name: `Business ${businessId}` })
+    .onConflictDoNothing();
+  await drizzleDb
+    .insert(users)
+    .values({ id: userId, email: `${userId}@example.com`, name: `User ${userId.slice(0, 8)}` })
+    .onConflictDoNothing();
+  await drizzleDb
+    .insert(businessMembers)
+    .values({ businessId, userId, role, status: options.status ?? 'ACTIVE' })
+    .onConflictDoNothing();
 }
 
 export function getTestDb(): DbType {

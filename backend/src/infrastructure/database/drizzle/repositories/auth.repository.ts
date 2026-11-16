@@ -1,8 +1,9 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { getDb } from '../client.js';
 import { users, businesses, businessMembers, refreshTokens } from '../schema.js';
 import type { User } from '../../../../domain/entities/user.entity.js';
 import { IAuthRepository } from '../../../../domain/repositories/auth.repository.js';
+import { normaliseEmail } from '../../../../domain/email.js';
 
 function toUser(row: typeof users.$inferSelect): User {
   return {
@@ -18,8 +19,12 @@ function toUser(row: typeof users.$inferSelect): User {
 }
 
 export class DrizzleAuthRepository implements IAuthRepository {
+  /** Email is compared case insensitively, so sign in never depends on casing. */
   async findUserByEmail(email: string): Promise<User | null> {
-    const result = await getDb().select().from(users).where(eq(users.email, email));
+    const result = await getDb()
+      .select()
+      .from(users)
+      .where(sql`lower(${users.email}) = lower(${email.trim()})`);
     return result.length > 0 ? toUser(result[0]) : null;
   }
 
@@ -32,7 +37,7 @@ export class DrizzleAuthRepository implements IAuthRepository {
     const result = await getDb()
       .insert(users)
       .values({
-        email: userData.email ?? '',
+        email: normaliseEmail(userData.email ?? ''),
         name: userData.name ?? '',
         passwordHash: userData.passwordHash ?? null,
         oauth: userData.oauth ?? [],
@@ -47,7 +52,7 @@ export class DrizzleAuthRepository implements IAuthRepository {
 
   async updateUser(userId: string, data: Partial<User>): Promise<void> {
     const changes: Partial<typeof users.$inferInsert> = { updatedAt: new Date() };
-    if (data.email !== undefined) changes.email = data.email;
+    if (data.email !== undefined) changes.email = normaliseEmail(data.email);
     if (data.passwordHash !== undefined) changes.passwordHash = data.passwordHash;
     if (data.name !== undefined) changes.name = data.name;
     if (data.oauth !== undefined) changes.oauth = data.oauth;
@@ -71,7 +76,7 @@ export class DrizzleAuthRepository implements IAuthRepository {
     businessId: string;
     userId: string;
     role: 'OWNER' | 'STAFF';
-    status: 'ACTIVE' | 'INVITED';
+    status: 'ACTIVE' | 'INVITED' | 'REMOVED';
   }): Promise<void> {
     await getDb().insert(businessMembers).values({
       businessId: data.businessId,

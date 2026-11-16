@@ -67,8 +67,18 @@ describe('security headers', () => {
 
     const rules = await nextConfig.headers?.();
 
-    expect(rules).toHaveLength(1);
-    expect(rules?.[0]?.source).toBe('/(.*)');
-    expect(rules?.[0]?.headers.map((header) => header.key)).toContain('Content-Security-Policy');
+    const global = rules?.find((rule) => rule.source === '/(.*)');
+    expect(global?.headers.map((header) => header.key)).toContain('Content-Security-Policy');
+  });
+
+  it('keeps invite links out of referrers and shared caches', async () => {
+    const rules = await nextConfig.headers?.();
+    const invite = rules?.find((rule) => rule.source === '/invite/:path*');
+
+    expect(invite).toBeDefined();
+    expect(headersByName(invite?.headers ?? [])['Referrer-Policy']).toBe('no-referrer');
+    // A stored copy of the preview document would be another person's invite.
+    expect(headersByName(invite?.headers ?? [])['Cache-Control']).toBe('no-store');
+    expect(headersByName(invite?.headers ?? [])['X-Robots-Tag']).toContain('noindex');
   });
 });
