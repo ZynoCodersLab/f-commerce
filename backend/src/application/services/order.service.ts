@@ -12,6 +12,7 @@ import {
 } from '@f-commerce/contracts';
 import {
   EDITABLE_ORDER_STATUSES,
+  getStockMovement,
   ORDER_TRANSITIONS,
   OrderDetail,
   OrderItem,
@@ -461,12 +462,26 @@ export class OrderService {
     }
 
     const actorName = await this.actorName(actor.userId);
-    const updated = await this.repository.changeStatus(order.id, order.version, nextStatus, {
-      changedByUserId: actor.userId,
-      changedByName: actorName,
-      note: input.note,
-      fromStatus: order.status,
-    });
+    const stockMovement = getStockMovement(order.status, nextStatus);
+    const updated = await this.repository.changeStatus(
+      order.id,
+      order.version,
+      nextStatus,
+      {
+        changedByUserId: actor.userId,
+        changedByName: actorName,
+        note: input.note,
+        fromStatus: order.status,
+      },
+      stockMovement
+        ? detail.items.map((item) => ({
+            kind: stockMovement,
+            productId: item.productId,
+            variantId: item.variantId ?? null,
+            quantity: item.quantity,
+          }))
+        : [],
+    );
 
     if (!updated) throw new OrderChangedError();
     return toOrderDto(updated);

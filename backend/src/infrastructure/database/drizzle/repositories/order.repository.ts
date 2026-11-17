@@ -6,6 +6,7 @@ import {
   auditLogs,
   businessOrderCounters,
   customers,
+  inventoryTransactions,
   orderItems,
   orders,
   orderStatusHistory,
@@ -15,6 +16,7 @@ import {
 } from '../schema.js';
 import { isUuid } from '../../../../domain/uuid.js';
 import { Customer } from '../../../../domain/entities/customer.entity.js';
+import { InventoryTransactionType } from '../../../../domain/entities/inventory.entity.js';
 import {
   Order,
   OrderDetail,
@@ -33,9 +35,12 @@ import {
   OrderListQuery,
   OrderListResult,
   OrderPair,
+  OrderStockMove,
   OrderUpdateData,
   OrderWriteItem,
 } from '../../../../domain/repositories/order.repository.js';
+
+type DbTransaction = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0];
 
 /** Escape LIKE metacharacters so search treats them literally. */
 function escapeLike(value: string): string {
@@ -588,6 +593,7 @@ export class DrizzleOrderRepository implements IOrderRepository {
     expectedVersion: number,
     status: OrderStatus,
     history: OrderHistoryWrite,
+    stockMoves: OrderStockMove[] = [],
   ): Promise<OrderDetail | null> {
     const businessId = getTenantId();
     if (!businessId || !isUuid(id)) return null;
@@ -618,6 +624,10 @@ export class DrizzleOrderRepository implements IOrderRepository {
         changedByName: history.changedByName,
         createdAt: now,
       });
+
+      if (stockMoves.length > 0) {
+        await this.applyStockMoves(tx, businessId, id, stockMoves);
+      }
 
       const itemRows = await tx
         .select()
@@ -666,5 +676,52 @@ export class DrizzleOrderRepository implements IOrderRepository {
       items: itemRows.map(toItem),
       history: historyRows.map(toHistory),
     };
+  }
+
+  /**
+   * Move stock for every line of a confirmed order inside the status
+   * transaction. A sale decrements the stocked level; a restoration credits
+   * the same level back by the same amount, so a round trip always nets zero.
+   * Lines on a product without variants adjust the product, and variant lines
+   * adjust the variant and its product, so the total the UI shows stays right.
+   */
+  private async applyStockMoves(
+    tx: DbTransaction,
+    businessId: string,
+    orderId: string,
+    moves: OrderStockMove[],
+  ): Promise<void> {
+    for (const move of moves) {
+      const delta = move.kind === 'sale' ? -move.quantity : move.quantity;
+
+      if (move.variantId) {
+        await tx
+          .update(productVariants)
+          .set({ stockCount: sql`greatest(${productVariants.stockCount} + ${delta}, 0)` })
+          .where(
+            and(eq(productVariants.id, move.variantId), eq(productVariants.businessId, businessId)),
+          );
+      }
+
+      await tx
+        .update(products)
+        .set({
+          stockCount: sql`greatest(${products.stockCount} + ${delta}, 0)`,
+          updatedAt: sql`now()`,
+        })
+        .where(and(eq(products.id, move.productId), eq(products.businessId, businessId)));
+
+      await tx.insert(inventoryTransactions).values({
+        businessId,
+        productId: move.productId,
+        type:
+          move.kind === 'sale'
+            ? InventoryTransactionType.DEDUCTION
+            : InventoryTransactionType.RESTORATION,
+        quantity: move.quantity,
+        orderId,
+        reason: move.kind === 'sale' ? 'Order confirmed' : 'Order cancelled or returned',
+      });
+    }
   }
 }
