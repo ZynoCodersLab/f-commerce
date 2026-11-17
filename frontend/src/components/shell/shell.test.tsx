@@ -1,12 +1,14 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThemeBoundary } from '@/components/theme/theme';
+import { setAuth } from '@/lib/auth-client';
 import { AppShell } from './shell';
 
 // The shell only reads settings; the provider has its own suite.
-const { settings } = vi.hoisted(() => ({
+const { replaceMock, settings } = vi.hoisted(() => ({
+  replaceMock: vi.fn(),
   settings: {
     currency: '',
     timezone: 'Asia/Dhaka',
@@ -18,6 +20,7 @@ const { settings } = vi.hoisted(() => ({
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/dashboard',
+  useRouter: () => ({ replace: replaceMock }),
 }));
 
 vi.mock('@/components/business/business-settings-provider', () => ({
@@ -36,6 +39,8 @@ function renderShell() {
 
 describe('AppShell business day', () => {
   beforeEach(() => {
+    window.localStorage.clear();
+    replaceMock.mockClear();
     settings.currency = '';
     settings.timezone = 'Asia/Dhaka';
     settings.name = 'Maya Traders';
@@ -50,6 +55,7 @@ describe('AppShell business day', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it('shows the app logo beside the product name in the sidebar and mobile header', () => {
@@ -181,6 +187,40 @@ describe('AppShell business day', () => {
     expect(container.querySelector('time')).toBeNull();
     expect(
       within(screen.getByRole('complementary', { name: 'Sidebar' })).getByText('Asia/Dhaka'),
+    ).toBeVisible();
+  });
+
+  it('logs out from the sidebar and returns to sign in', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => ({ status: 200 }) as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    setAuth({ accessToken: 'tok', businessId: 'biz-1' });
+
+    renderShell();
+
+    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
+    await user.click(within(sidebar).getByRole('button', { name: /log out/i }));
+
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/login'));
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/logout',
+      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+    );
+    expect(window.localStorage.getItem('accessToken')).toBeNull();
+    expect(window.localStorage.getItem('businessId')).toBeNull();
+  });
+
+  it('offers log out from the More sheet on mobile', async () => {
+    const user = userEvent.setup();
+
+    renderShell();
+
+    await user.click(screen.getByRole('button', { name: /open navigation/i }));
+
+    expect(
+      within(screen.getByRole('dialog', { name: /more/i })).getByRole('button', {
+        name: /log out/i,
+      }),
     ).toBeVisible();
   });
 });

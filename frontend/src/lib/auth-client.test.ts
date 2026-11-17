@@ -7,6 +7,7 @@ import {
   getAuthHeaders,
   getUserIdFromToken,
   isTimeoutError,
+  logout,
   setAuth,
   subscribeToAuth,
 } from '@/lib/auth-client';
@@ -48,6 +49,38 @@ describe('auth-client', () => {
     it('clearAuth removes both keys', () => {
       setAuth({ accessToken: 'tok', businessId: 'biz-1' });
       clearAuth();
+      expect(getAuth()).toBeNull();
+    });
+  });
+
+  describe('logout', () => {
+    it('revokes the refresh cookie and clears the local session', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+      setAuth({ accessToken: 'tok', businessId: 'biz-1' });
+      writeBusinessSettingsCache('biz-1', { currency: 'USD', timezone: 'America/New_York' });
+
+      await logout();
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/auth/logout',
+        expect.objectContaining({ method: 'POST', credentials: 'include' }),
+      );
+      expect(getAuth()).toBeNull();
+      expect(window.localStorage.getItem(businessSettingsCacheKey('biz-1'))).toBeNull();
+    });
+
+    it('clears the local session even when the API is unreachable', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
+      setAuth({ accessToken: 'tok', businessId: 'biz-1' });
+
+      await logout();
+
       expect(getAuth()).toBeNull();
     });
   });

@@ -5,6 +5,7 @@ import { useState } from 'react';
 import {
   ChevronRight,
   LayoutDashboard,
+  LogOut,
   Menu,
   MoreHorizontal,
   Package,
@@ -16,7 +17,7 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import NextLink from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   Badge,
   Button,
@@ -29,6 +30,7 @@ import {
 } from '@/components/ui/primitives';
 import { ThemeToggle } from '@/components/theme/theme';
 import { useBusinessSettings } from '@/components/business/business-settings-provider';
+import { logout } from '@/lib/auth-client';
 import { formatBusinessDayLabel, todayInTimeZone } from '@/lib/timezone';
 
 type RouteItem = {
@@ -76,7 +78,32 @@ function RouteLink({
   );
 }
 
-function MoreMenu({ pathname, onClose }: { pathname: string; onClose: () => void }) {
+function LogoutButton({ loggingOut, onLogout }: { loggingOut: boolean; onLogout: () => void }) {
+  return (
+    <Button
+      className="w-full"
+      disabled={loggingOut}
+      onClick={onLogout}
+      type="button"
+      variant="secondary"
+    >
+      <LogOut aria-hidden="true" size={18} />
+      {loggingOut ? 'Logging out...' : 'Log out'}
+    </Button>
+  );
+}
+
+function MoreMenu({
+  loggingOut,
+  onClose,
+  onLogout,
+  pathname,
+}: {
+  loggingOut: boolean;
+  onClose: () => void;
+  onLogout: () => void;
+  pathname: string;
+}) {
   return (
     <div className="grid gap-2">
       <p className="text-sm text-body">
@@ -89,6 +116,9 @@ function MoreMenu({ pathname, onClose }: { pathname: string; onClose: () => void
           </div>
         ))}
       </nav>
+      <div className="mt-2 border-t border-border pt-3">
+        <LogoutButton loggingOut={loggingOut} onLogout={onLogout} />
+      </div>
     </div>
   );
 }
@@ -128,11 +158,20 @@ function BusinessLogo({ logoUrl, name }: { logoUrl: string | null; name: string 
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const { currency, timezone, name: businessName, logoUrl, mounted } = useBusinessSettings();
   const businessDay = mounted ? todayInTimeZone(timezone) : null;
   const businessDayLabel = mounted ? formatBusinessDayLabel(timezone) : null;
   const badgeLabel = currency ? `${timezone} · ${currency}` : timezone;
+
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    await logout();
+    router.replace('/login');
+  };
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
@@ -185,6 +224,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Badge>
             <ThemeToggle />
           </div>
+          <LogoutButton loggingOut={loggingOut} onLogout={handleLogout} />
         </div>
       </aside>
 
@@ -254,7 +294,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <Sheet onClose={() => setMoreOpen(false)} open={moreOpen} title="More">
-        <MoreMenu onClose={() => setMoreOpen(false)} pathname={pathname} />
+        <MoreMenu
+          loggingOut={loggingOut}
+          onClose={() => setMoreOpen(false)}
+          onLogout={handleLogout}
+          pathname={pathname}
+        />
       </Sheet>
     </div>
   );
