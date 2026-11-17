@@ -267,6 +267,28 @@ describe('SettingsPage', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(/profile updated/i);
   });
 
+  it('pins the save confirmation to the viewport, so a long form still shows it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, { success: true, data: businessData })),
+    );
+    const user = userEvent.setup();
+
+    render(
+      <ThemeBoundary>
+        <SettingsPage />
+      </ThemeBoundary>,
+    );
+
+    await screen.findByRole('heading', { name: /business profile/i });
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    const notice = await screen.findByRole('status');
+    expect(notice).toHaveTextContent(/profile updated/i);
+    expect(notice.className).toMatch(/\bfixed\b/);
+    expect(notice.className).toMatch(/\bbottom-4\b/);
+  });
+
   it('keeps a valid currency when the save response reports an empty one', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/business/me' && init?.method === 'PUT') {

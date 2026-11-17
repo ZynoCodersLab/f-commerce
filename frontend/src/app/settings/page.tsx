@@ -222,6 +222,7 @@ export default function SettingsPage() {
   };
 
   const saveProfile = () => {
+    setSuccess(null);
     const parsedTimeZone = TimezoneSchema.safeParse(form.timezone);
     if (!parsedTimeZone.success) {
       setError('Choose a valid timezone.');
@@ -303,7 +304,11 @@ export default function SettingsPage() {
 
         {error && <FormMessage id="settings-error">{error}</FormMessage>}
         {success && (
-          <p className="text-sm text-success" role="status">
+          <p
+            aria-live="polite"
+            className="fixed inset-x-4 bottom-4 z-40 mx-auto max-w-md rounded-md border border-success bg-success-soft px-4 py-3 text-sm font-semibold text-success shadow-lg lg:inset-x-auto lg:left-64 lg:right-4"
+            role="status"
+          >
             {success}
           </p>
         )}
