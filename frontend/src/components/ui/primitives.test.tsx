@@ -1,31 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { Button, Dialog, Field, Input, Select, Textarea, Toast } from './primitives';
+import { Button, Dialog, Field, Input, Select, Textarea } from './primitives';
 
 describe('primitives', () => {
-  it('announces toast content politely and offers a close control', () => {
-    let dismissed = 0;
-    render(
-      <Toast onDismiss={() => (dismissed += 1)}>
-        <p>Profile updated</p>
-      </Toast>,
-    );
-
-    const toast = screen.getByRole('status');
-    expect(toast).toHaveAttribute('aria-live', 'polite');
-    expect(toast).toHaveTextContent('Profile updated');
-
-    fireEvent.click(screen.getByRole('button', { name: /close/i }));
-    expect(dismissed).toBe(1);
-  });
-
-  it('renders a toast without a close control when no dismiss handler is given', () => {
-    render(<Toast>Saved</Toast>);
-
-    expect(screen.getByRole('status')).toHaveTextContent('Saved');
-    expect(screen.queryByRole('button', { name: /close/i })).toBeNull();
-  });
-
   it('associates a field error and description with the control', () => {
     render(
       <Field

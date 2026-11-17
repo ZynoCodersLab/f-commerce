@@ -1,15 +1,15 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import {
+  Alert,
   Button,
   Dialog,
   Field,
   FormMessage,
   Input,
   Select,
-  Toast,
 } from '@/components/ui/primitives';
 import { AppShell } from '@/components/shell/shell';
 import { apiFetch } from '@/lib/auth-client';
@@ -31,9 +31,6 @@ type Address = {
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 
-/** How long the save confirmation stays on screen before it dismisses itself. */
-const SUCCESS_DISMISS_MS = 4000;
-
 export default function SettingsPage() {
   // Gate behind authentication. All hooks below are called unconditionally
   // so hook order is stable across the ready/not-ready renders.
@@ -47,16 +44,6 @@ export default function SettingsPage() {
   const [pendingTimeZone, setPendingTimeZone] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [logoUploading, setLogoUploading] = useState(false);
-
-  // Each confirmation dismisses itself, but a new one restarts the clock.
-  const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!success) return;
-    dismissTimer.current = setTimeout(() => setSuccess(null), SUCCESS_DISMISS_MS);
-    return () => {
-      if (dismissTimer.current) clearTimeout(dismissTimer.current);
-    };
-  }, [success]);
 
   const [form, setForm] = useState({
     name: '',
@@ -325,12 +312,14 @@ export default function SettingsPage() {
 
         {error && <FormMessage id="settings-error">{error}</FormMessage>}
         {success && (
-          <Toast
-            className="fixed inset-x-4 top-4 z-40 sm:inset-x-auto sm:right-4 sm:w-80"
-            onDismiss={() => setSuccess(null)}
-          >
-            <p className="font-semibold">{success}</p>
-          </Toast>
+          <Alert variant="success">
+            <div className="flex items-center justify-between gap-4">
+              <span>{success}</span>
+              <Button onClick={() => setSuccess(null)} type="button" variant="quiet">
+                Dismiss
+              </Button>
+            </div>
+          </Alert>
         )}
 
         <div className="space-y-6">

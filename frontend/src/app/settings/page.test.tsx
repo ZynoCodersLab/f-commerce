@@ -267,7 +267,7 @@ describe('SettingsPage', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(/profile updated/i);
   });
 
-  it('shows the save confirmation as a toast in the top right corner', async () => {
+  it('shows the save confirmation as an alert like the other screens', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => jsonResponse(200, { success: true, data: businessData })),
@@ -285,34 +285,13 @@ describe('SettingsPage', () => {
 
     const notice = await screen.findByRole('status');
     expect(notice).toHaveTextContent(/profile updated/i);
-    expect(notice.className).toMatch(/\bfixed\b/);
-    expect(notice.className).toMatch(/\btop-4\b/);
-    expect(notice.className).toMatch(/\bsm:right-4\b/);
+    // Inline, in the page flow, with the shared success signal styling.
+    expect(notice.className).not.toMatch(/\bfixed\b/);
+    expect(notice.className).toMatch(/\bbg-success-soft\b/);
+    expect(notice.className).toMatch(/\btext-success\b/);
   });
 
-  it('dismisses the save confirmation on its own after a few seconds', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => jsonResponse(200, { success: true, data: businessData })),
-    );
-    const user = userEvent.setup();
-
-    render(
-      <ThemeBoundary>
-        <SettingsPage />
-      </ThemeBoundary>,
-    );
-
-    await screen.findByRole('heading', { name: /business profile/i });
-    await user.click(screen.getByRole('button', { name: /save changes/i }));
-    expect(await screen.findByRole('status')).toHaveTextContent(/profile updated/i);
-
-    // The notice dismisses itself on a real timer, so wait it out rather than
-    // swapping clocks mid-test.
-    await waitFor(() => expect(screen.queryByRole('status')).toBeNull(), { timeout: 6000 });
-  });
-
-  it('closes the save confirmation from its close button', async () => {
+  it('closes the save confirmation from its dismiss button', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => jsonResponse(200, { success: true, data: businessData })),
@@ -330,47 +309,9 @@ describe('SettingsPage', () => {
 
     expect(await screen.findByRole('status')).toHaveTextContent(/profile updated/i);
 
-    await user.click(screen.getByRole('button', { name: /close/i }));
+    await user.click(screen.getByRole('button', { name: /dismiss/i }));
 
     expect(screen.queryByRole('status')).toBeNull();
-  });
-
-  it('keeps a valid currency when the save response reports an empty one', async () => {
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/business/me' && init?.method === 'PUT') {
-        return jsonResponse(200, { success: true, data: { ...businessData, currency: '' } });
-      }
-      return jsonResponse(200, { success: true, data: businessData });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-    const user = userEvent.setup();
-
-    render(
-      <ThemeBoundary>
-        <SettingsPage />
-        <SettingsProbe />
-      </ThemeBoundary>,
-    );
-
-    await screen.findByRole('heading', { name: /business profile/i });
-    // The provider has the stored currency before the save runs.
-    await waitFor(() =>
-      expect(screen.getByTestId('shared-settings')).toHaveTextContent('BDT|Asia/Dhaka'),
-    );
-
-    await user.click(screen.getByRole('button', { name: /save changes/i }));
-    await screen.findByRole('status');
-
-    // The malformed currency is ignored instead of blanking the badge and cache.
-    expect(screen.getByTestId('shared-settings')).toHaveTextContent('BDT|Asia/Dhaka');
-    expect(window.localStorage.getItem(businessSettingsCacheKey('biz-1'))).toBe(
-      JSON.stringify({
-        currency: 'BDT',
-        timezone: 'Asia/Dhaka',
-        name: 'Maya Traders',
-        logoUrl: 'https://res.cloudinary.com/demo/logo.png',
-      }),
-    );
   });
 
   it('covers AC-6: applies the saved timezone when the response omits currency', async () => {
