@@ -1,0 +1,5 @@
+- use logo placed in the frontend/public/logo.png - done
+- update logo from settings page - done
+- when A order confirmed, that product should decreaseUpdate the product count after an order is confirmed or returned - pirtially done. Confirmed decreases, cancelled increases but returned doe not increase
+- Replace the silent skeleton loading state in frontend/src/app/products/page.tsx and frontend/src/app/customers/page.tsx
+- Type createdAt/updatedAt in packages/contracts/src/customer.ts, order.ts, and product.ts instead of z.string() (confirmed still strings)
