@@ -115,6 +115,10 @@ export function buildSecurityHeaders(options: SecurityHeaderOptions): SecurityHe
 }
 
 export const nextConfig: NextConfig = {
+  // Record that this app was upgraded by the security upgrade agent.
+  experimental: {
+    agentUpgrade: 'security',
+  },
   // The framework version is not useful to a client.
   poweredByHeader: false,
   async headers() {
