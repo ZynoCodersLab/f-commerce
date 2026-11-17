@@ -166,6 +166,70 @@ describe('SettingsPage', () => {
     expect(logo).toHaveAttribute('src', 'https://res.cloudinary.com/demo/logo.png');
   });
 
+  it('offers a logo upload control instead of a read-only note', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(200, { success: true, data: businessData })),
+    );
+
+    render(
+      <ThemeBoundary>
+        <SettingsPage />
+      </ThemeBoundary>,
+    );
+
+    // The old copy told the owner the logo was frozen at onboarding time.
+    expect(await screen.findByText(/choose an image to replace/i)).toBeVisible();
+    expect(screen.queryByText(/set via the onboarding wizard/i)).not.toBeInTheDocument();
+    const input = screen.getByLabelText(/business logo/i);
+    expect(input).toHaveAttribute('type', 'file');
+    expect(input).toHaveAttribute('accept', 'image/*');
+  });
+
+  it('uploads a new logo, updates the preview and the shared settings cache', async () => {
+    const nextLogo = 'https://res.cloudinary.com/demo/new-logo.png';
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/business/logo' && init?.method === 'POST') {
+        return jsonResponse(200, { success: true, data: { logoUrl: nextLogo } });
+      }
+      return jsonResponse(200, { success: true, data: businessData });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    // jsdom has no createObjectURL; the preview only needs an opaque string.
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview-logo');
+    const user = userEvent.setup();
+
+    render(
+      <ThemeBoundary>
+        <SettingsPage />
+      </ThemeBoundary>,
+    );
+
+    const input = await screen.findByLabelText(/business logo/i);
+    const file = new File(['png-bytes'], 'logo.png', { type: 'image/png' });
+    await user.upload(input, file);
+
+    // The response URL replaces the local blob preview and the saved message shows.
+    expect(await screen.findByRole('status')).toHaveTextContent(/logo updated/i);
+    await waitFor(() =>
+      expect(screen.getByRole('img', { name: /business logo/i })).toHaveAttribute('src', nextLogo),
+    );
+
+    const uploadCall = fetchMock.mock.calls.find((call) => call[0] === '/api/business/logo');
+    expect(uploadCall).toBeTruthy();
+    const body = uploadCall![1]!.body as FormData;
+    expect(body).toBeInstanceOf(FormData);
+    expect(body.get('image')).toBe(file);
+    expect(window.localStorage.getItem(businessSettingsCacheKey('biz-1'))).toBe(
+      JSON.stringify({
+        currency: 'BDT',
+        timezone: 'Asia/Dhaka',
+        name: 'Maya Traders',
+        logoUrl: nextLogo,
+      }),
+    );
+  });
+
   it('shows an error when the business profile cannot be loaded', async () => {
     vi.stubGlobal(
       'fetch',
