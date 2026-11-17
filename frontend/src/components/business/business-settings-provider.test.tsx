@@ -12,6 +12,11 @@ function Consumer() {
   return <p data-testid="settings">{`${currency}|${timezone}|${mounted}`}</p>;
 }
 
+function IdentityConsumer() {
+  const { name, logoUrl } = useBusinessSettings();
+  return <p data-testid="identity">{`${name}|${logoUrl ?? ''}`}</p>;
+}
+
 function SettingsWriter({
   next,
   businessId,
@@ -35,10 +40,15 @@ function renderProvider() {
   );
 }
 
-function profileResponse(currency: string, timezone: string): Response {
+function profileResponse(
+  currency: string,
+  timezone: string,
+  name = 'Maya Traders',
+  logoUrl: string | null = null,
+): Response {
   return {
     ok: true,
-    json: async () => ({ success: true, data: { currency, timezone } }),
+    json: async () => ({ success: true, data: { name, logoUrl, currency, timezone } }),
   } as Response;
 }
 
@@ -93,7 +103,39 @@ describe('BusinessSettingsProvider', () => {
     );
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(window.localStorage.getItem(businessSettingsCacheKey('biz-fetch'))).toBe(
-      JSON.stringify({ currency: 'EUR', timezone: 'Europe/Paris' }),
+      JSON.stringify({
+        currency: 'EUR',
+        timezone: 'Europe/Paris',
+        name: 'Maya Traders',
+        logoUrl: null,
+      }),
+    );
+  });
+
+  it('loads the business name and logo for the sidebar', async () => {
+    setAuth({ accessToken: 'tok', businessId: 'biz-identity' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        profileResponse(
+          'USD',
+          'America/New_York',
+          'Acme Supply',
+          'https://res.cloudinary.com/demo/logo.png',
+        ),
+      ),
+    );
+
+    render(
+      <BusinessSettingsProvider>
+        <IdentityConsumer />
+      </BusinessSettingsProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('identity')).toHaveTextContent(
+        'Acme Supply|https://res.cloudinary.com/demo/logo.png',
+      ),
     );
   });
 
@@ -198,7 +240,12 @@ describe('BusinessSettingsProvider', () => {
     // The bad currency is ignored, and the valid zone from the same write lands.
     expect(screen.getByTestId('settings')).toHaveTextContent('USD|America/New_York|true');
     expect(window.localStorage.getItem(businessSettingsCacheKey('biz-bad-write'))).toBe(
-      JSON.stringify({ currency: 'USD', timezone: 'America/New_York' }),
+      JSON.stringify({
+        currency: 'USD',
+        timezone: 'America/New_York',
+        name: '',
+        logoUrl: null,
+      }),
     );
   });
 
@@ -226,7 +273,12 @@ describe('BusinessSettingsProvider', () => {
     // The valid currency lands and the bad zone leaves the cached zone intact.
     expect(screen.getByTestId('settings')).toHaveTextContent('EUR|Europe/Berlin|true');
     expect(window.localStorage.getItem(businessSettingsCacheKey('biz-bad-zone-write'))).toBe(
-      JSON.stringify({ currency: 'EUR', timezone: 'Europe/Berlin' }),
+      JSON.stringify({
+        currency: 'EUR',
+        timezone: 'Europe/Berlin',
+        name: '',
+        logoUrl: null,
+      }),
     );
   });
 
@@ -250,7 +302,12 @@ describe('BusinessSettingsProvider', () => {
 
     expect(screen.getByTestId('settings')).toHaveTextContent('GBP|America/New_York|true');
     expect(window.localStorage.getItem(businessSettingsCacheKey('biz-good-write'))).toBe(
-      JSON.stringify({ currency: 'GBP', timezone: 'America/New_York' }),
+      JSON.stringify({
+        currency: 'GBP',
+        timezone: 'America/New_York',
+        name: '',
+        logoUrl: null,
+      }),
     );
   });
 

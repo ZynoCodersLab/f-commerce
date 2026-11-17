@@ -11,6 +11,7 @@ import {
 import { CurrencyEnum, TimezoneSchema } from '@f-commerce/contracts';
 import { apiFetch, getAuth, subscribeToAuth } from '@/lib/auth-client';
 import {
+  normalizeLogoUrl,
   pruneBusinessSettingsCache,
   readBusinessSettingsCache,
   writeBusinessSettingsCache,
@@ -20,12 +21,16 @@ import { DEFAULT_TIME_ZONE } from '@/lib/timezone';
 export interface BusinessSettings {
   currency: string;
   timezone: string;
+  name: string;
+  logoUrl: string | null;
 }
 
-/** A save response is untrusted, so the provider validates both fields on write. */
+/** A save response is untrusted, so the provider validates every field on write. */
 export interface BusinessSettingsInput {
   currency: unknown;
   timezone: unknown;
+  name?: unknown;
+  logoUrl?: unknown;
 }
 
 interface BusinessSettingsSnapshot extends BusinessSettings {
@@ -46,6 +51,8 @@ interface BusinessSettingsContextValue extends BusinessSettingsSnapshot {
 const FALLBACK_SETTINGS: BusinessSettings = {
   currency: '',
   timezone: DEFAULT_TIME_ZONE,
+  name: '',
+  logoUrl: null,
 };
 
 const SERVER_SNAPSHOT: BusinessSettingsSnapshot = {
@@ -65,7 +72,7 @@ let snapshotKey = '';
 const listeners = new Set<() => void>();
 
 function settingsKey(settings: BusinessSettings): string {
-  return `${settings.currency}|${settings.timezone}`;
+  return JSON.stringify([settings.currency, settings.timezone, settings.name, settings.logoUrl]);
 }
 
 function emit(): void {
@@ -98,6 +105,8 @@ function computeSnapshot(): BusinessSettingsSnapshot {
   return {
     currency: base.currency,
     timezone: base.timezone,
+    name: base.name ?? '',
+    logoUrl: base.logoUrl ?? null,
     businessId: auth.businessId,
     mounted: true,
   };
@@ -107,7 +116,7 @@ function getSnapshot(): BusinessSettingsSnapshot {
   if (typeof window === 'undefined') return SERVER_SNAPSHOT;
 
   const next = computeSnapshot();
-  const nextKey = `${next.businessId}|${next.currency}|${next.timezone}|${next.mounted}`;
+  const nextKey = `${next.businessId}|${next.currency}|${next.timezone}|${next.name}|${next.logoUrl ?? ''}|${next.mounted}`;
   if (nextKey !== snapshotKey) {
     snapshotKey = nextKey;
     snapshot = next;
@@ -119,7 +128,7 @@ function getServerSnapshot(): BusinessSettingsSnapshot {
   return SERVER_SNAPSHOT;
 }
 
-/** Read the two settings from a profile response without trusting the rest. */
+/** Read the profile fields the shell needs without trusting the rest. */
 function settingsFromProfile(payload: unknown): BusinessSettings | null {
   if (!payload || typeof payload !== 'object') return null;
 
@@ -129,10 +138,13 @@ function settingsFromProfile(payload: unknown): BusinessSettings | null {
   const record = data as Record<string, unknown>;
   const currency = CurrencyEnum.safeParse(record.currency);
   const timezone = TimezoneSchema.safeParse(record.timezone);
+  const name = typeof record.name === 'string' ? record.name.trim() : '';
 
   return {
     currency: currency.success ? currency.data : '',
     timezone: timezone.success ? timezone.data : DEFAULT_TIME_ZONE,
+    name,
+    logoUrl: normalizeLogoUrl(record.logoUrl),
   };
 }
 
@@ -155,9 +167,15 @@ function sanitizeSettings(
 ): BusinessSettings {
   const currency = CurrencyEnum.safeParse(next.currency);
   const timezone = TimezoneSchema.safeParse(next.timezone);
+  const name =
+    typeof next.name === 'string' && next.name.trim() !== '' ? next.name.trim() : fallback.name;
+  const logoUrl = next.logoUrl === undefined ? fallback.logoUrl : normalizeLogoUrl(next.logoUrl);
+
   return {
     currency: currency.success ? currency.data : fallback.currency,
     timezone: timezone.success ? timezone.data : fallback.timezone,
+    name,
+    logoUrl,
   };
 }
 
@@ -242,11 +260,21 @@ export function BusinessSettingsProvider({ children }: { children: React.ReactNo
     () => ({
       currency: current.currency,
       timezone: current.timezone,
+      name: current.name,
+      logoUrl: current.logoUrl,
       businessId: current.businessId,
       mounted: current.mounted,
       updateSettings,
     }),
-    [current.businessId, current.currency, current.mounted, current.timezone, updateSettings],
+    [
+      current.businessId,
+      current.currency,
+      current.logoUrl,
+      current.mounted,
+      current.name,
+      current.timezone,
+      updateSettings,
+    ],
   );
 
   return (

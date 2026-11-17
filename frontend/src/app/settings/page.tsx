@@ -137,13 +137,26 @@ export default function SettingsPage() {
       }
 
       const data = await res.json();
-      const saved = data.data as { currency?: unknown; timezone?: unknown };
+      const saved = data.data as {
+        currency?: unknown;
+        timezone?: unknown;
+        name?: unknown;
+        logoUrl?: unknown;
+      };
       const savedTimeZone = TimezoneSchema.safeParse(saved.timezone);
       const nextTimeZone = savedTimeZone.success ? savedTimeZone.data : timeZone;
 
       // The response is untrusted; the provider keeps the last valid value
       // for each field, so the timezone still lands when currency is missing.
-      updateSettings({ currency: saved.currency, timezone: nextTimeZone }, targetBusinessId);
+      updateSettings(
+        {
+          currency: saved.currency,
+          timezone: nextTimeZone,
+          name: saved.name,
+          logoUrl: saved.logoUrl,
+        },
+        targetBusinessId,
+      );
 
       setBaselineTimeZone(nextTimeZone);
       setForm((prev) => ({ ...prev, timezone: nextTimeZone }));

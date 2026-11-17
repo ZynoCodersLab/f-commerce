@@ -282,6 +282,15 @@ export default function OnboardingPage() {
 
       const result = await res.json();
       setForm({ ...form, logoUrl: result.data.logoUrl });
+      updateSettings(
+        {
+          currency: form.currency,
+          timezone: form.timezone,
+          name: form.name,
+          logoUrl: result.data.logoUrl,
+        },
+        businessId,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
@@ -322,14 +331,21 @@ export default function OnboardingPage() {
       }
 
       const data = await res.json();
-      const saved = data.data as { currency?: unknown; timezone?: unknown };
+      const saved = data.data as {
+        currency?: unknown;
+        timezone?: unknown;
+        name?: unknown;
+        logoUrl?: unknown;
+      };
       const savedTimeZone = TimezoneSchema.safeParse(saved.timezone);
-      // Both fields go to the provider, which validates each one. If the
+      // Every field goes to the provider, which validates each one. If the
       // response omits the zone, keep the zone this request just saved.
       updateSettings(
         {
           currency: saved.currency,
           timezone: savedTimeZone.success ? savedTimeZone.data : parsedTimeZone.data,
+          name: saved.name,
+          logoUrl: saved.logoUrl,
         },
         targetBusinessId,
       );

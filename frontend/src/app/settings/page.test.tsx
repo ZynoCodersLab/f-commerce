@@ -232,7 +232,12 @@ describe('SettingsPage', () => {
     // The malformed currency is ignored instead of blanking the badge and cache.
     expect(screen.getByTestId('shared-settings')).toHaveTextContent('BDT|Asia/Dhaka');
     expect(window.localStorage.getItem(businessSettingsCacheKey('biz-1'))).toBe(
-      JSON.stringify({ currency: 'BDT', timezone: 'Asia/Dhaka' }),
+      JSON.stringify({
+        currency: 'BDT',
+        timezone: 'Asia/Dhaka',
+        name: 'Maya Traders',
+        logoUrl: 'https://res.cloudinary.com/demo/logo.png',
+      }),
     );
   });
 
@@ -274,7 +279,12 @@ describe('SettingsPage', () => {
     // keeps the last valid currency instead of dropping the whole update.
     expect(screen.getByTestId('shared-settings')).toHaveTextContent('BDT|Europe/Berlin');
     expect(window.localStorage.getItem(businessSettingsCacheKey('biz-1'))).toBe(
-      JSON.stringify({ currency: 'BDT', timezone: 'Europe/Berlin' }),
+      JSON.stringify({
+        currency: 'BDT',
+        timezone: 'Europe/Berlin',
+        name: 'Maya Traders',
+        logoUrl: 'https://res.cloudinary.com/demo/logo.png',
+      }),
     );
   });
 
@@ -330,7 +340,12 @@ describe('SettingsPage', () => {
     // The response belongs to biz-1, so biz-2 keeps its own settings and cache.
     expect(screen.getByTestId('shared-settings')).toHaveTextContent('EUR|Europe/Paris');
     expect(window.localStorage.getItem(businessSettingsCacheKey('biz-2'))).toBe(
-      JSON.stringify({ currency: 'EUR', timezone: 'Europe/Paris' }),
+      JSON.stringify({
+        currency: 'EUR',
+        timezone: 'Europe/Paris',
+        name: 'Other Co',
+        logoUrl: 'https://res.cloudinary.com/demo/logo.png',
+      }),
     );
   });
 

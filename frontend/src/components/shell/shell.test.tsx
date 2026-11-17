@@ -7,7 +7,13 @@ import { AppShell } from './shell';
 
 // The shell only reads settings; the provider has its own suite.
 const { settings } = vi.hoisted(() => ({
-  settings: { currency: '', timezone: 'Asia/Dhaka', mounted: false },
+  settings: {
+    currency: '',
+    timezone: 'Asia/Dhaka',
+    name: 'Maya Traders',
+    logoUrl: null as string | null,
+    mounted: false,
+  },
 }));
 
 vi.mock('next/navigation', () => ({
@@ -32,6 +38,8 @@ describe('AppShell business day', () => {
   beforeEach(() => {
     settings.currency = '';
     settings.timezone = 'Asia/Dhaka';
+    settings.name = 'Maya Traders';
+    settings.logoUrl = null;
     settings.mounted = false;
 
     // 20:00 UTC is already the next day in Dhaka, so the browser day and the
@@ -42,6 +50,35 @@ describe('AppShell business day', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('shows the app logo beside the product name in the sidebar and mobile header', () => {
+    const { container } = renderShell();
+    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
+
+    expect(within(sidebar).getByText('F Commerce')).toBeVisible();
+    expect(within(sidebar).getByText('Order Desk')).toBeVisible();
+    expect(sidebar.querySelector('img[src="/logo.png"]')).not.toBeNull();
+    expect(container.querySelectorAll('img[src="/logo.png"]')).toHaveLength(2);
+  });
+
+  it('shows the uploaded business logo beside the business name', () => {
+    settings.logoUrl = 'https://res.cloudinary.com/demo/logo.png';
+
+    renderShell();
+
+    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
+    expect(within(sidebar).getByText('Maya Traders')).toBeVisible();
+    expect(
+      sidebar.querySelector('img[src="https://res.cloudinary.com/demo/logo.png"]'),
+    ).not.toBeNull();
+  });
+
+  it('shows the business initials when no logo is uploaded', () => {
+    renderShell();
+
+    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
+    expect(within(sidebar).getByText('MT')).toBeVisible();
   });
 
   // covers AC-7: the workspace badge names the business zone and currency.
