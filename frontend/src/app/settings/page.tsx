@@ -1,9 +1,16 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { X } from 'lucide-react';
 import Image from 'next/image';
-import { Button, Dialog, Field, FormMessage, Input, Select } from '@/components/ui/primitives';
+import {
+  Button,
+  Dialog,
+  Field,
+  FormMessage,
+  Input,
+  Select,
+  Toast,
+} from '@/components/ui/primitives';
 import { AppShell } from '@/components/shell/shell';
 import { apiFetch } from '@/lib/auth-client';
 import { useRequireAuth } from '@/lib/auth-guard';
@@ -318,23 +325,12 @@ export default function SettingsPage() {
 
         {error && <FormMessage id="settings-error">{error}</FormMessage>}
         {success && (
-          <div
-            className="fixed inset-x-4 top-4 z-40 rounded-md border border-sky bg-surface px-4 py-3 text-sm text-ink shadow-panel sm:inset-x-auto sm:right-4 sm:w-80"
-            role="status"
+          <Toast
+            className="fixed inset-x-4 top-4 z-40 sm:inset-x-auto sm:right-4 sm:w-80"
+            onDismiss={() => setSuccess(null)}
           >
-            <div className="flex items-start gap-3">
-              <span className="flex-1 font-semibold">{success}</span>
-              <Button
-                className="shrink-0 px-3 text-xs font-semibold"
-                onClick={() => setSuccess(null)}
-                type="button"
-                variant="quiet"
-              >
-                <X aria-hidden="true" size={14} />
-                Close
-              </Button>
-            </div>
-          </div>
+            <p className="font-semibold">{success}</p>
+          </Toast>
         )}
 
         <div className="space-y-6">

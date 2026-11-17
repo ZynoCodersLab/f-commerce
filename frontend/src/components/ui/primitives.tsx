@@ -9,6 +9,7 @@ import type {
   TextareaHTMLAttributes,
 } from 'react';
 import { createContext, useContext, useEffect, useId, useRef } from 'react';
+import { X } from 'lucide-react';
 
 type ButtonVariant = 'primary' | 'secondary' | 'quiet' | 'danger';
 
@@ -422,14 +423,35 @@ export function Sheet({
   );
 }
 
-export function Toast({ children }: { children: ReactNode }) {
+export function Toast({
+  children,
+  className = '',
+  onDismiss,
+}: {
+  children: ReactNode;
+  className?: string;
+  onDismiss?: () => void;
+}) {
   return (
     <div
       aria-live="polite"
-      className="rounded-md border border-border bg-surface p-4 text-sm text-ink shadow-panel"
+      className={`rounded-md border border-border bg-surface p-4 text-sm text-ink shadow-panel ${className}`}
       role="status"
     >
-      {children}
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">{children}</div>
+        {onDismiss && (
+          <Button
+            className="shrink-0 px-3 text-xs font-semibold"
+            onClick={onDismiss}
+            type="button"
+            variant="quiet"
+          >
+            <X aria-hidden="true" size={14} />
+            Close
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
