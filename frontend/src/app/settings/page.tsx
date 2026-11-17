@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { X } from 'lucide-react';
 import Image from 'next/image';
 import { Button, Dialog, Field, FormMessage, Input, Select } from '@/components/ui/primitives';
 import { AppShell } from '@/components/shell/shell';
@@ -23,6 +24,9 @@ type Address = {
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 
+/** How long the save confirmation stays on screen before it dismisses itself. */
+const SUCCESS_DISMISS_MS = 4000;
+
 export default function SettingsPage() {
   // Gate behind authentication. All hooks below are called unconditionally
   // so hook order is stable across the ready/not-ready renders.
@@ -36,6 +40,16 @@ export default function SettingsPage() {
   const [pendingTimeZone, setPendingTimeZone] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [logoUploading, setLogoUploading] = useState(false);
+
+  // Each confirmation dismisses itself, but a new one restarts the clock.
+  const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!success) return;
+    dismissTimer.current = setTimeout(() => setSuccess(null), SUCCESS_DISMISS_MS);
+    return () => {
+      if (dismissTimer.current) clearTimeout(dismissTimer.current);
+    };
+  }, [success]);
 
   const [form, setForm] = useState({
     name: '',
@@ -304,13 +318,23 @@ export default function SettingsPage() {
 
         {error && <FormMessage id="settings-error">{error}</FormMessage>}
         {success && (
-          <p
-            aria-live="polite"
-            className="fixed inset-x-4 bottom-4 z-40 mx-auto max-w-md rounded-md border border-success bg-success-soft px-4 py-3 text-sm font-semibold text-success shadow-lg lg:inset-x-auto lg:left-64 lg:right-4"
+          <div
+            className="fixed inset-x-4 top-4 z-40 rounded-md border border-sky bg-surface px-4 py-3 text-sm text-ink shadow-panel sm:inset-x-auto sm:right-4 sm:w-80"
             role="status"
           >
-            {success}
-          </p>
+            <div className="flex items-start gap-3">
+              <span className="flex-1 font-semibold">{success}</span>
+              <Button
+                className="shrink-0 px-3 text-xs font-semibold"
+                onClick={() => setSuccess(null)}
+                type="button"
+                variant="quiet"
+              >
+                <X aria-hidden="true" size={14} />
+                Close
+              </Button>
+            </div>
+          </div>
         )}
 
         <div className="space-y-6">

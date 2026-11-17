@@ -267,7 +267,7 @@ describe('SettingsPage', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(/profile updated/i);
   });
 
-  it('pins the save confirmation to the viewport, so a long form still shows it', async () => {
+  it('shows the save confirmation as a toast in the top right corner', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => jsonResponse(200, { success: true, data: businessData })),
@@ -286,7 +286,53 @@ describe('SettingsPage', () => {
     const notice = await screen.findByRole('status');
     expect(notice).toHaveTextContent(/profile updated/i);
     expect(notice.className).toMatch(/\bfixed\b/);
-    expect(notice.className).toMatch(/\bbottom-4\b/);
+    expect(notice.className).toMatch(/\btop-4\b/);
+    expect(notice.className).toMatch(/\bsm:right-4\b/);
+  });
+
+  it('dismisses the save confirmation on its own after a few seconds', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, { success: true, data: businessData })),
+    );
+    const user = userEvent.setup();
+
+    render(
+      <ThemeBoundary>
+        <SettingsPage />
+      </ThemeBoundary>,
+    );
+
+    await screen.findByRole('heading', { name: /business profile/i });
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+    expect(await screen.findByRole('status')).toHaveTextContent(/profile updated/i);
+
+    // The notice dismisses itself on a real timer, so wait it out rather than
+    // swapping clocks mid-test.
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull(), { timeout: 6000 });
+  });
+
+  it('closes the save confirmation from its close button', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, { success: true, data: businessData })),
+    );
+    const user = userEvent.setup();
+
+    render(
+      <ThemeBoundary>
+        <SettingsPage />
+      </ThemeBoundary>,
+    );
+
+    await screen.findByRole('heading', { name: /business profile/i });
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/profile updated/i);
+
+    await user.click(screen.getByRole('button', { name: /close/i }));
+
+    expect(screen.queryByRole('status')).toBeNull();
   });
 
   it('keeps a valid currency when the save response reports an empty one', async () => {
