@@ -143,11 +143,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="mb-10 flex items-center gap-3 px-3">
           <Image
             alt=""
-            className="size-14 shrink-0 rounded-md object-contain"
-            height={56}
+            className="size-16 shrink-0 rounded-md object-contain"
+            height={64}
             src="/logo.png"
             unoptimized
-            width={56}
+            width={64}
           />
           <div>
             <p className="font-mono text-xs uppercase tracking-widest text-sky-strong">
