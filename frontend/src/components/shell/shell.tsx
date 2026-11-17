@@ -150,10 +150,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             width={64}
           />
           <div>
-            <p className="font-mono text-xs uppercase tracking-widest text-sky-strong">
+            <p className="font-mono text-sm uppercase tracking-widest text-sky-strong">
               F Commerce
             </p>
-            <p className="text-sm font-semibold text-ink">Order Desk</p>
+            <p className="text-base font-semibold text-ink">Order Desk</p>
           </div>
         </div>
         <nav aria-label="Primary navigation" className="grid gap-1">
