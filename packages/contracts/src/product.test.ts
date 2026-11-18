@@ -4,6 +4,7 @@ import {
   imageUrlSchema,
   ProductCreateSchema,
   ProductListQuerySchema,
+  ProductSchema,
   ProductUpdateSchema,
   ProductVersionSchema,
 } from './index.js';
@@ -151,6 +152,38 @@ describe('product contracts', () => {
     expect(ProductListQuerySchema.safeParse({ limit: 'ten' }).success).toBe(false);
     expect(ProductListQuerySchema.safeParse({ stockStatus: 'many' }).success).toBe(false);
     expect(ProductListQuerySchema.safeParse({ categoryId: 'not-a-uuid' }).success).toBe(false);
+  });
+
+  // covers the response contract: timestamps stay ISO strings, so reject a
+  // stored value that would not survive JSON date serialization
+  it('rejects product timestamps that are not ISO 8601', () => {
+    const product = {
+      id: 'product-1',
+      name: 'Tee',
+      description: null,
+      categoryId: CATEGORY_ID,
+      categoryName: 'Shirts',
+      sku: null,
+      price: 100,
+      cost: null,
+      stockCount: 5,
+      lowStockThreshold: 2,
+      availableStock: 5,
+      stockStatus: 'inStock',
+      images: [],
+      options: [],
+      variants: [],
+      isArchived: false,
+      archivedAt: null,
+      version: 1,
+      createdAt: '2026-10-20T10:00:00.000Z',
+      updatedAt: '2026-10-20T10:00:00.000Z',
+    };
+
+    expect(ProductSchema.safeParse(product).success).toBe(true);
+    expect(ProductSchema.safeParse({ ...product, createdAt: '2026-10-20' }).success).toBe(false);
+    expect(ProductSchema.safeParse({ ...product, updatedAt: 'not-a-date' }).success).toBe(false);
+    expect(ProductSchema.safeParse({ ...product, archivedAt: '2026-10-20' }).success).toBe(false);
   });
 
   it('trims category names and treats a blank description as absent', () => {

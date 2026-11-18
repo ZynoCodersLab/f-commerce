@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { IsoDateTimeSchema } from './datetime.js';
+
 /** Roles a membership can hold. */
 export const TeamRoleEnum = z.enum(['OWNER', 'STAFF']);
 export type TeamRole = z.infer<typeof TeamRoleEnum>;
@@ -85,15 +87,13 @@ export const MemberRoleUpdateSchema = z.object({
   role: TeamRoleEnum,
 });
 
-const isoDate = z.iso.datetime();
-
 export const TeamMemberSchema = z.object({
   id: z.string(),
   userId: z.string(),
   name: z.string(),
   email: z.string(),
   role: TeamRoleEnum,
-  joinedAt: isoDate,
+  joinedAt: IsoDateTimeSchema,
 });
 
 export const TeamInvitationSchema = z.object({
@@ -101,10 +101,10 @@ export const TeamInvitationSchema = z.object({
   email: z.string(),
   role: TeamRoleEnum,
   invitedByName: z.string(),
-  sentAt: isoDate.nullable(),
-  lastSentAt: isoDate,
-  createdAt: isoDate,
-  expiresAt: isoDate,
+  sentAt: IsoDateTimeSchema.nullable(),
+  lastSentAt: IsoDateTimeSchema,
+  createdAt: IsoDateTimeSchema,
+  expiresAt: IsoDateTimeSchema,
   status: z.enum(['PENDING', 'EXPIRED']),
   emailStatus: InviteEmailStatusEnum,
   emailError: z.string().nullable(),
@@ -137,7 +137,7 @@ export const InvitePreviewSchema = z.object({
   inviterName: z.string(),
   email: z.string(),
   role: TeamRoleEnum,
-  expiresAt: isoDate,
+  expiresAt: IsoDateTimeSchema,
   /**
    * The invited business's zone, so a signed out visitor sees the expiry in the
    * right place. Presence only: a legacy or corrupt stored zone must not fail a

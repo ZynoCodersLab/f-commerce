@@ -7,6 +7,7 @@ import {
   OrderPageSchema,
   OrderSchema,
   OrderStatusChangeSchema,
+  OrderSummarySchema,
   OrderUpdateSchema,
 } from './index.js';
 
@@ -428,6 +429,28 @@ describe('order response contracts', () => {
 
     expect(OrderPageSchema.parse({ items: [row], nextCursor: null }).items).toHaveLength(1);
     expect(OrderPageSchema.parse({ items: [], nextCursor: 'abc' }).nextCursor).toBe('abc');
+  });
+
+  // covers the response contract: timestamps stay ISO strings, so reject a
+  // stored value that would not survive JSON date serialization
+  it('rejects order timestamps that are not ISO 8601', () => {
+    const row = {
+      id: 'order-1',
+      orderNumber: 'ORD-0001',
+      status: 'PENDING',
+      customerName: 'Nusrat Jahan',
+      total: 2550,
+      dueAmount: 2550,
+      source: null,
+      deliveryDeadline: null,
+      itemCount: 1,
+      createdAt: '2026-10-20T10:00:00.000Z',
+      updatedAt: '2026-10-20T10:00:00.000Z',
+    };
+
+    expect(OrderSummarySchema.safeParse(row).success).toBe(true);
+    expect(OrderSummarySchema.safeParse({ ...row, createdAt: '2026-10-20' }).success).toBe(false);
+    expect(OrderSummarySchema.safeParse({ ...row, updatedAt: 'not-a-date' }).success).toBe(false);
   });
 
   it('requires the existing order in a duplicate error', () => {

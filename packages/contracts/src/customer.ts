@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { IsoDateTimeSchema } from './datetime.js';
+
 /** Action codes recorded when a customer's visibility changes. */
 export const CustomerAuditAction = {
   ARCHIVED: 'CUSTOMER_ARCHIVED',
@@ -112,10 +114,10 @@ export const CustomerSchema = z.object({
   email: z.string().nullable(),
   address: z.string().nullable(),
   notes: z.string().nullable(),
-  archivedAt: z.string().nullable(),
+  archivedAt: IsoDateTimeSchema.nullable(),
   version: z.number().int(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
+  createdAt: IsoDateTimeSchema,
+  updatedAt: IsoDateTimeSchema,
 });
 
 export const CustomerSummarySchema = CustomerSchema.pick({ id: true, name: true, phone: true });
@@ -135,7 +137,7 @@ export const CustomerProfileSchema = CustomerSchema.extend({
 export const CustomerOrderSchema = z.object({
   id: z.string(),
   orderNumber: z.string(),
-  createdAt: z.string(),
+  createdAt: IsoDateTimeSchema,
   status: z.string(),
   total: z.number(),
   dueAmount: z.number(),

@@ -3,6 +3,7 @@ import {
   CustomerCreateSchema,
   CustomerOrderPageSchema,
   CustomerProfileSchema,
+  CustomerSchema,
   CustomerUpdateSchema,
   DuplicatePhoneErrorSchema,
 } from './index.js';
@@ -172,6 +173,28 @@ describe('customer response contracts', () => {
       total: 500,
       dueAmount: 0,
     });
+  });
+
+  // covers the response contract: timestamps stay ISO strings, so reject a
+  // stored value that would not survive JSON date serialization
+  it('rejects customer timestamps that are not ISO 8601', () => {
+    const customer = {
+      id: '11111111-1111-4111-8111-111111111111',
+      name: 'Anika Rahman',
+      phone: '+8801712345678',
+      email: null,
+      address: null,
+      notes: null,
+      archivedAt: null,
+      version: 2,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+
+    expect(CustomerSchema.safeParse(customer).success).toBe(true);
+    expect(CustomerSchema.safeParse({ ...customer, createdAt: '2026-01-01' }).success).toBe(false);
+    expect(CustomerSchema.safeParse({ ...customer, updatedAt: 'not-a-date' }).success).toBe(false);
+    expect(CustomerSchema.safeParse({ ...customer, archivedAt: '2026-01-01' }).success).toBe(false);
   });
 
   // covers AC-3: the archived flag tells the client to offer restore
