@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import { render } from '@/test-utils/render';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CustomerDto } from '@f-commerce/contracts';
@@ -73,6 +73,7 @@ describe('CustomersPage', () => {
 
     const loading = screen.getByText('Loading customers…');
     expect(loading.closest('[role="status"]')).not.toBeNull();
+    expect(loading).toHaveClass('sr-only');
   });
 
   it('announces the empty customer list', async () => {
@@ -115,5 +116,40 @@ describe('CustomersPage', () => {
       'href',
       '/customers/customer-1',
     );
+  });
+
+  // covers silent paging: the next page request must not repeat while it is in
+  // flight, and the buttons stay locked until it settles
+  it('locks paging while the next page loads', async () => {
+    let listCalls = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (!url.startsWith('/api/customers?')) {
+        return Promise.resolve(jsonResponse(404, { error: 'NOT_FOUND' }));
+      }
+      listCalls += 1;
+      if (listCalls > 1) {
+        return new Promise<Response>(() => {});
+      }
+      return Promise.resolve(
+        jsonResponse(200, {
+          success: true,
+          data: { items: [makeCustomer()], nextCursor: 'cursor-2' },
+        }),
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+    await screen.findAllByRole('link', { name: 'Nusrat Jahan' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(screen.queryByText('Loading customers…')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(listCalls).toBe(2);
   });
 });

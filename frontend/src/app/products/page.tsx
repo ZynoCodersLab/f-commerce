@@ -26,7 +26,6 @@ import {
   Select,
   Sheet,
   Skeleton,
-  Spinner,
 } from '@/components/ui/primitives';
 import { CategoryManager } from '@/components/catalog/category-manager';
 import { ProductFields } from '@/components/catalog/product-form';
@@ -651,12 +650,6 @@ export default function ProductsPage() {
             <Skeleton className="h-20 w-full" />
             <Skeleton className="h-20 w-full" />
           </div>
-        )}
-
-        {isLoading && rows.length > 0 && (
-          <p className="flex items-center gap-2 text-sm text-muted" role="status">
-            <Spinner /> Loading products…
-          </p>
         )}
 
         {error && <ErrorState onRetry={retry}>{error}</ErrorState>}

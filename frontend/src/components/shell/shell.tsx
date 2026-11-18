@@ -3,19 +3,21 @@
 import type { ComponentType, ReactNode } from 'react';
 import { useState } from 'react';
 import {
-  Boxes,
   ChevronRight,
   LayoutDashboard,
+  LogOut,
   Menu,
   MoreHorizontal,
   Package,
   Settings,
   ShoppingBag,
+  Store,
   Users,
   UsersRound,
 } from 'lucide-react';
+import Image from 'next/image';
 import NextLink from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   Badge,
   Button,
@@ -28,6 +30,7 @@ import {
 } from '@/components/ui/primitives';
 import { ThemeToggle } from '@/components/theme/theme';
 import { useBusinessSettings } from '@/components/business/business-settings-provider';
+import { logout } from '@/lib/auth-client';
 import { formatBusinessDayLabel, todayInTimeZone } from '@/lib/timezone';
 
 type RouteItem = {
@@ -48,21 +51,24 @@ const secondaryRoutes: RouteItem[] = [
   { href: '/settings/team', label: 'Team', icon: UsersRound },
 ];
 
-function isRouteActive(pathname: string, href: string) {
-  return pathname === href || pathname.startsWith(`${href}/`);
+function activeHref(pathname: string, items: RouteItem[]): string | null {
+  let active: string | null = null;
+  for (const item of items) {
+    if (pathname !== item.href && !pathname.startsWith(`${item.href}/`)) continue;
+    if (!active || item.href.length > active.length) active = item.href;
+  }
+  return active;
 }
 
 function RouteLink({
+  active,
   item,
   mobile = false,
-  pathname,
 }: {
+  active: boolean;
   item: RouteItem;
   mobile?: boolean;
-  pathname: string;
 }) {
-  const active = isRouteActive(pathname, item.href);
-
   return (
     <NextLink
       aria-current={active ? 'page' : undefined}
@@ -75,7 +81,34 @@ function RouteLink({
   );
 }
 
-function MoreMenu({ pathname, onClose }: { pathname: string; onClose: () => void }) {
+function LogoutButton({ loggingOut, onLogout }: { loggingOut: boolean; onLogout: () => void }) {
+  return (
+    <Button
+      className="w-full"
+      disabled={loggingOut}
+      onClick={onLogout}
+      type="button"
+      variant="secondary"
+    >
+      <LogOut aria-hidden="true" size={18} />
+      {loggingOut ? 'Logging out...' : 'Log out'}
+    </Button>
+  );
+}
+
+function MoreMenu({
+  loggingOut,
+  onClose,
+  onLogout,
+  pathname,
+}: {
+  loggingOut: boolean;
+  onClose: () => void;
+  onLogout: () => void;
+  pathname: string;
+}) {
+  const currentHref = activeHref(pathname, secondaryRoutes);
+
   return (
     <div className="grid gap-2">
       <p className="text-sm text-body">
@@ -84,21 +117,67 @@ function MoreMenu({ pathname, onClose }: { pathname: string; onClose: () => void
       <nav aria-label="Secondary navigation" className="grid gap-1">
         {secondaryRoutes.map((item) => (
           <div key={item.href} onClick={onClose}>
-            <RouteLink item={item} pathname={pathname} />
+            <RouteLink active={currentHref === item.href} item={item} />
           </div>
         ))}
       </nav>
+      <div className="mt-2 border-t border-border pt-3">
+        <LogoutButton loggingOut={loggingOut} onLogout={onLogout} />
+      </div>
     </div>
+  );
+}
+
+function businessInitials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return `${words[0][0]}${words[1][0]}`.toUpperCase();
+}
+
+function BusinessLogo({ logoUrl, name }: { logoUrl: string | null; name: string }) {
+  if (logoUrl) {
+    return (
+      // Cloudinary already serves the stored asset from its CDN; keep the
+      // URL as-is instead of proxying it through the image optimizer.
+      <Image
+        alt=""
+        className="size-10 shrink-0 rounded-md bg-surface object-contain"
+        height={40}
+        src={logoUrl}
+        unoptimized
+        width={40}
+      />
+    );
+  }
+
+  return (
+    <span
+      aria-hidden="true"
+      className="grid size-10 shrink-0 place-items-center rounded-md bg-sky-soft font-mono text-xs font-semibold text-sky-strong"
+    >
+      {businessInitials(name) || <Store aria-hidden="true" size={18} />}
+    </span>
   );
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const currentHref = activeHref(pathname, routes);
+  const router = useRouter();
   const [moreOpen, setMoreOpen] = useState(false);
-  const { currency, timezone, mounted } = useBusinessSettings();
+  const [loggingOut, setLoggingOut] = useState(false);
+  const { currency, timezone, name: businessName, logoUrl, mounted } = useBusinessSettings();
   const businessDay = mounted ? todayInTimeZone(timezone) : null;
   const businessDayLabel = mounted ? formatBusinessDayLabel(timezone) : null;
   const badgeLabel = currency ? `${timezone} · ${currency}` : timezone;
+
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    await logout();
+    router.replace('/login');
+  };
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
@@ -107,19 +186,24 @@ export function AppShell({ children }: { children: ReactNode }) {
         className="fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-border bg-surface px-5 py-6 lg:flex"
       >
         <div className="mb-10 flex items-center gap-3 px-3">
-          <span className="grid size-10 place-items-center rounded-md bg-ink text-on-ink">
-            <Boxes aria-hidden="true" size={20} />
-          </span>
+          <Image
+            alt=""
+            className="size-16 shrink-0 rounded-md object-contain"
+            height={64}
+            src="/logo.png"
+            unoptimized
+            width={64}
+          />
           <div>
-            <p className="font-mono text-xs uppercase tracking-widest text-sky-strong">
+            <p className="font-mono text-sm uppercase tracking-widest text-sky-strong">
               F Commerce
             </p>
-            <p className="text-sm font-semibold text-ink">Order desk</p>
+            <p className="text-base font-semibold text-ink">Order Desk</p>
           </div>
         </div>
         <nav aria-label="Primary navigation" className="grid gap-1">
           {routes.map((item) => (
-            <RouteLink item={item} key={item.href} pathname={pathname} />
+            <RouteLink active={currentHref === item.href} item={item} key={item.href} />
           ))}
           <button
             className="flex min-h-11 items-center gap-3 rounded-md px-3 text-left text-sm font-semibold text-body transition-colors hover:bg-surface-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky"
@@ -131,14 +215,22 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </nav>
         <div className="mt-auto grid gap-4 rounded-lg border border-border bg-surface-muted p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-ink">Maya Traders</p>
+          <div className="flex min-w-0 items-center gap-3">
+            <BusinessLogo logoUrl={logoUrl} name={businessName} />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-ink">
+                {businessName || 'Your business'}
+              </p>
               <p className="text-xs text-muted">Owner workspace</p>
             </div>
+          </div>
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            <Badge className="min-w-0 max-w-full">
+              <span className="truncate">{badgeLabel}</span>
+            </Badge>
             <ThemeToggle />
           </div>
-          <Badge>{badgeLabel}</Badge>
+          <LogoutButton loggingOut={loggingOut} onLogout={handleLogout} />
         </div>
       </aside>
 
@@ -148,9 +240,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="lg:flex lg:min-h-16 lg:items-center">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="grid size-9 shrink-0 place-items-center rounded-md bg-ink text-on-ink lg:hidden">
-                    <Boxes aria-hidden="true" size={18} />
-                  </span>
+                  <Image
+                    alt=""
+                    className="size-9 shrink-0 rounded-md object-contain lg:hidden"
+                    height={36}
+                    src="/logo.png"
+                    unoptimized
+                    width={36}
+                  />
                   <p className="min-h-4 min-w-0 whitespace-nowrap font-mono text-[0.65rem] uppercase tracking-wide text-sky-strong">
                     {businessDay && businessDayLabel ? (
                       <time dateTime={businessDay}>{businessDayLabel}</time>
@@ -189,7 +286,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-border bg-surface/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 backdrop-blur lg:hidden"
         >
           {routes.map((item) => (
-            <RouteLink item={item} key={item.href} mobile pathname={pathname} />
+            <RouteLink active={currentHref === item.href} item={item} key={item.href} mobile />
           ))}
           <button
             className="flex min-h-11 flex-col items-center justify-center gap-1 rounded-md text-xs font-semibold text-body focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky"
@@ -203,7 +300,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <Sheet onClose={() => setMoreOpen(false)} open={moreOpen} title="More">
-        <MoreMenu onClose={() => setMoreOpen(false)} pathname={pathname} />
+        <MoreMenu
+          loggingOut={loggingOut}
+          onClose={() => setMoreOpen(false)}
+          onLogout={handleLogout}
+          pathname={pathname}
+        />
       </Sheet>
     </div>
   );

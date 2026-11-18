@@ -247,7 +247,13 @@ export default function OnboardingPage() {
     // what the seller has typed.
   }, [router]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!ready) return <div className="p-8">Loading your profile...</div>;
+  if (!ready) {
+    return (
+      <div className="p-8" role="status">
+        <span className="sr-only">Loading your profile...</span>
+      </div>
+    );
+  }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -282,6 +288,15 @@ export default function OnboardingPage() {
 
       const result = await res.json();
       setForm({ ...form, logoUrl: result.data.logoUrl });
+      updateSettings(
+        {
+          currency: form.currency,
+          timezone: form.timezone,
+          name: form.name,
+          logoUrl: result.data.logoUrl,
+        },
+        businessId,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
@@ -322,14 +337,21 @@ export default function OnboardingPage() {
       }
 
       const data = await res.json();
-      const saved = data.data as { currency?: unknown; timezone?: unknown };
+      const saved = data.data as {
+        currency?: unknown;
+        timezone?: unknown;
+        name?: unknown;
+        logoUrl?: unknown;
+      };
       const savedTimeZone = TimezoneSchema.safeParse(saved.timezone);
-      // Both fields go to the provider, which validates each one. If the
+      // Every field goes to the provider, which validates each one. If the
       // response omits the zone, keep the zone this request just saved.
       updateSettings(
         {
           currency: saved.currency,
           timezone: savedTimeZone.success ? savedTimeZone.data : parsedTimeZone.data,
+          name: saved.name,
+          logoUrl: saved.logoUrl,
         },
         targetBusinessId,
       );
@@ -344,7 +366,11 @@ export default function OnboardingPage() {
   };
 
   if (isLoading) {
-    return <div className="p-8">Loading your profile...</div>;
+    return (
+      <div className="p-8" role="status">
+        <span className="sr-only">Loading your profile...</span>
+      </div>
+    );
   }
 
   if (business?.onboardingComplete) {

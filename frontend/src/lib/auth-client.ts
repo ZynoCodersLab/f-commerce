@@ -128,6 +128,20 @@ export async function apiFetch(input: RequestInfo, init?: RequestInit): Promise<
 }
 
 /**
+ * Revoke the refresh cookie, then clear the local session. The local clear
+ * always runs, so an unreachable API cannot leave the browser signed in.
+ */
+export async function logout(): Promise<void> {
+  try {
+    await apiFetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+  } catch {
+    // The refresh cookie may survive, but the local session must not.
+  } finally {
+    clearAuth();
+  }
+}
+
+/**
  * Reads the user id from an access token payload without verifying it. The team
  * screen uses it only to tell the caller apart from other members, so an absent
  * or unreadable token is treated as "not the caller" rather than an error.

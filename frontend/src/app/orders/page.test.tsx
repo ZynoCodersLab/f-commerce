@@ -123,6 +123,7 @@ describe('OrdersPage', () => {
 
     const loading = screen.getByText('Loading orders…');
     expect(loading.closest('[role="status"]')).not.toBeNull();
+    expect(loading).toHaveClass('sr-only');
   });
 
   it('sends the status filter and debounced search to the list request', async () => {

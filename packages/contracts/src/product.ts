@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { IsoDateTimeSchema } from './datetime.js';
+
 // Re-declare StockStatus enum in contracts for frontend use without importing backend
 export const ProductStockStatus = {
   IN_STOCK: 'inStock',
@@ -156,8 +158,8 @@ export const CategorySchema = z.object({
   name: z.string(),
   description: z.string().nullable(),
   version: z.number().int(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
+  createdAt: IsoDateTimeSchema,
+  updatedAt: IsoDateTimeSchema,
 });
 
 export const CategoryListSchema = z.array(CategorySchema);
@@ -312,10 +314,10 @@ export const ProductSchema = z.object({
   ),
   variants: z.array(VariantDtoSchema),
   isArchived: z.boolean(),
-  archivedAt: z.string().nullable(),
+  archivedAt: IsoDateTimeSchema.nullable(),
   version: z.number().int(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
+  createdAt: IsoDateTimeSchema,
+  updatedAt: IsoDateTimeSchema,
 });
 
 export const ProductPageSchema = z.object({

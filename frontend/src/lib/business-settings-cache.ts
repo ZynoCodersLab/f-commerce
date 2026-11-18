@@ -3,9 +3,27 @@ import { CurrencyEnum, TimezoneSchema } from '@f-commerce/contracts';
 export interface CachedBusinessSettings {
   currency: string;
   timezone: string;
+  /** Optional because entries written before the sidebar showed identity have no name. */
+  name?: string;
+  logoUrl?: string | null;
 }
 
 const CACHE_PREFIX = 'f-commerce:business-settings:v1:';
+
+/** Accept only the absolute http(s) URLs a business logo can safely use. */
+export function normalizeLogoUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+
+  const candidate = value.trim();
+  if (candidate === '') return null;
+
+  try {
+    const url = new URL(candidate);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? candidate : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The last parsed entry. The provider reads this on every render, so an
@@ -36,7 +54,17 @@ function parseBusinessSettingsCache(raw: string | null): CachedBusinessSettings 
 
   if (!currency.success || !timezone.success) return null;
 
-  return { currency: currency.data, timezone: timezone.data };
+  const name =
+    typeof record.name === 'string' && record.name.trim() !== '' ? record.name.trim() : undefined;
+
+  return {
+    currency: currency.data,
+    timezone: timezone.data,
+    ...(name ? { name } : {}),
+    ...(record.logoUrl === null || typeof record.logoUrl === 'string'
+      ? { logoUrl: normalizeLogoUrl(record.logoUrl) }
+      : {}),
+  };
 }
 
 /**
@@ -74,7 +102,7 @@ export function pruneBusinessSettingsCache(businessId: string): void {
   }
 }
 
-/** Write only the two fields the console needs, under a versioned key. */
+/** Write the fields the console needs, under a versioned key. */
 export function writeBusinessSettingsCache(
   businessId: string,
   settings: CachedBusinessSettings,
@@ -85,7 +113,12 @@ export function writeBusinessSettingsCache(
   try {
     window.localStorage.setItem(
       businessSettingsCacheKey(businessId),
-      JSON.stringify({ currency: settings.currency, timezone: settings.timezone }),
+      JSON.stringify({
+        currency: settings.currency,
+        timezone: settings.timezone,
+        ...(settings.name !== undefined ? { name: settings.name } : {}),
+        ...(settings.logoUrl !== undefined ? { logoUrl: settings.logoUrl } : {}),
+      }),
     );
   } catch {
     // Storage can be unavailable or full; the profile fetch still works.

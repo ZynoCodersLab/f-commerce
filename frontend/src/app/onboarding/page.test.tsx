@@ -95,7 +95,7 @@ describe('OnboardingPage', () => {
       </ThemeBoundary>,
     );
 
-    expect(screen.getByText(/loading your profile/i)).toBeVisible();
+    expect(screen.getByText(/loading your profile/i)).toHaveClass('sr-only');
   });
 
   it('shows an error when the business profile cannot be loaded', async () => {
@@ -662,7 +662,12 @@ describe('OnboardingPage', () => {
     // The missing currency keeps the stored value; the valid timezone lands.
     expect(screen.getByTestId('settings')).toHaveTextContent('BDT|America/New_York');
     expect(window.localStorage.getItem(businessSettingsCacheKey('biz-1'))).toBe(
-      JSON.stringify({ currency: 'BDT', timezone: 'America/New_York' }),
+      JSON.stringify({
+        currency: 'BDT',
+        timezone: 'America/New_York',
+        name: 'Maya Traders',
+        logoUrl: null,
+      }),
     );
   });
 
@@ -748,7 +753,12 @@ describe('OnboardingPage', () => {
     // The response belongs to biz-1, so biz-2 keeps its own settings and cache.
     expect(screen.getByTestId('settings')).toHaveTextContent('BDT|Asia/Dhaka');
     expect(window.localStorage.getItem(businessSettingsCacheKey('biz-2'))).toBe(
-      JSON.stringify({ currency: 'BDT', timezone: 'Asia/Dhaka' }),
+      JSON.stringify({
+        currency: 'BDT',
+        timezone: 'Asia/Dhaka',
+        name: 'Maya Traders',
+        logoUrl: null,
+      }),
     );
   });
 

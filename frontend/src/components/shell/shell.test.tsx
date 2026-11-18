@@ -1,17 +1,27 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThemeBoundary } from '@/components/theme/theme';
+import { setAuth } from '@/lib/auth-client';
 import { AppShell } from './shell';
 
 // The shell only reads settings; the provider has its own suite.
-const { settings } = vi.hoisted(() => ({
-  settings: { currency: '', timezone: 'Asia/Dhaka', mounted: false },
+const { nav, replaceMock, settings } = vi.hoisted(() => ({
+  nav: { pathname: '/dashboard' },
+  replaceMock: vi.fn(),
+  settings: {
+    currency: '',
+    timezone: 'Asia/Dhaka',
+    name: 'Maya Traders',
+    logoUrl: null as string | null,
+    mounted: false,
+  },
 }));
 
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/dashboard',
+  usePathname: () => nav.pathname,
+  useRouter: () => ({ replace: replaceMock }),
 }));
 
 vi.mock('@/components/business/business-settings-provider', () => ({
@@ -30,8 +40,13 @@ function renderShell() {
 
 describe('AppShell business day', () => {
   beforeEach(() => {
+    window.localStorage.clear();
+    replaceMock.mockClear();
+    nav.pathname = '/dashboard';
     settings.currency = '';
     settings.timezone = 'Asia/Dhaka';
+    settings.name = 'Maya Traders';
+    settings.logoUrl = null;
     settings.mounted = false;
 
     // 20:00 UTC is already the next day in Dhaka, so the browser day and the
@@ -42,6 +57,36 @@ describe('AppShell business day', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('shows the app logo beside the product name in the sidebar and mobile header', () => {
+    const { container } = renderShell();
+    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
+
+    expect(within(sidebar).getByText('F Commerce')).toBeVisible();
+    expect(within(sidebar).getByText('Order Desk')).toBeVisible();
+    expect(sidebar.querySelector('img[src="/logo.png"]')).not.toBeNull();
+    expect(container.querySelectorAll('img[src="/logo.png"]')).toHaveLength(2);
+  });
+
+  it('shows the uploaded business logo beside the business name', () => {
+    settings.logoUrl = 'https://res.cloudinary.com/demo/logo.png';
+
+    renderShell();
+
+    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
+    expect(within(sidebar).getByText('Maya Traders')).toBeVisible();
+    expect(
+      sidebar.querySelector('img[src="https://res.cloudinary.com/demo/logo.png"]'),
+    ).not.toBeNull();
+  });
+
+  it('shows the business initials when no logo is uploaded', () => {
+    renderShell();
+
+    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
+    expect(within(sidebar).getByText('MT')).toBeVisible();
   });
 
   // covers AC-7: the workspace badge names the business zone and currency.
@@ -101,6 +146,25 @@ describe('AppShell business day', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  // The deeper team route lives inside settings, so only the team link is current.
+  it('marks only the deepest nav match active on a nested page', async () => {
+    nav.pathname = '/settings/team';
+    const user = userEvent.setup();
+
+    renderShell();
+
+    await user.click(screen.getByRole('button', { name: /open navigation/i }));
+
+    const sheet = screen.getByRole('dialog', { name: /more/i });
+    expect(within(sheet).getByRole('link', { name: /team/i })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(within(sheet).getByRole('link', { name: /settings/i })).not.toHaveAttribute(
+      'aria-current',
+    );
+  });
+
   // covers AC-9: the header date follows the business zone, not the browser zone.
   it('shows the business calendar day in the header, not the UTC day', () => {
     settings.timezone = 'Asia/Dhaka';
@@ -144,6 +208,40 @@ describe('AppShell business day', () => {
     expect(container.querySelector('time')).toBeNull();
     expect(
       within(screen.getByRole('complementary', { name: 'Sidebar' })).getByText('Asia/Dhaka'),
+    ).toBeVisible();
+  });
+
+  it('logs out from the sidebar and returns to sign in', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => ({ status: 200 }) as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    setAuth({ accessToken: 'tok', businessId: 'biz-1' });
+
+    renderShell();
+
+    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
+    await user.click(within(sidebar).getByRole('button', { name: /log out/i }));
+
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/login'));
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/logout',
+      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+    );
+    expect(window.localStorage.getItem('accessToken')).toBeNull();
+    expect(window.localStorage.getItem('businessId')).toBeNull();
+  });
+
+  it('offers log out from the More sheet on mobile', async () => {
+    const user = userEvent.setup();
+
+    renderShell();
+
+    await user.click(screen.getByRole('button', { name: /open navigation/i }));
+
+    expect(
+      within(screen.getByRole('dialog', { name: /more/i })).getByRole('button', {
+        name: /log out/i,
+      }),
     ).toBeVisible();
   });
 });

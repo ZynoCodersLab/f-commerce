@@ -2,7 +2,15 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { Button, Dialog, Field, FormMessage, Input, Select } from '@/components/ui/primitives';
+import {
+  Alert,
+  Button,
+  Dialog,
+  Field,
+  FormMessage,
+  Input,
+  Select,
+} from '@/components/ui/primitives';
 import { AppShell } from '@/components/shell/shell';
 import { apiFetch } from '@/lib/auth-client';
 import { useRequireAuth } from '@/lib/auth-guard';
@@ -21,27 +29,21 @@ type Address = {
   country: string;
 };
 
-type BusinessData = {
-  name: string;
-  currency: string;
-  timezone: string;
-  logoUrl: string | null;
-  address: Address | null;
-  onboardingComplete: boolean;
-};
+const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 
 export default function SettingsPage() {
   // Gate behind authentication. All hooks below are called unconditionally
   // so hook order is stable across the ready/not-ready renders.
   const ready = useRequireAuth();
   const { businessId, updateSettings } = useBusinessSettings();
-  const [business, setBusiness] = useState<BusinessData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [baselineTimeZone, setBaselineTimeZone] = useState(DEFAULT_TIME_ZONE);
   const [pendingTimeZone, setPendingTimeZone] = useState<string | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
 
   const [form, setForm] = useState({
     name: '',
@@ -73,8 +75,8 @@ export default function SettingsPage() {
           const parsedTimeZone = TimezoneSchema.safeParse(b.timezone);
           const timezone = parsedTimeZone.success ? parsedTimeZone.data : DEFAULT_TIME_ZONE;
 
-          setBusiness(b);
           setBaselineTimeZone(timezone);
+          setLogoPreview(b.logoUrl ?? null);
           setForm({
             name: b.name,
             currency: (b.currency || 'BDT') as BusinessProfile['currency'],
@@ -112,10 +114,68 @@ export default function SettingsPage() {
   if (!ready) {
     return (
       <AppShell>
-        <div className="p-8">Loading...</div>
+        <div className="p-8" role="status">
+          <span className="sr-only">Loading...</span>
+        </div>
       </AppShell>
     );
   }
+
+  const handleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset so choosing the same file again still fires a change event.
+    e.target.value = '';
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setError('Only image files are allowed');
+      return;
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      setError('File must be under 2MB');
+      return;
+    }
+
+    // Capture the owner before the request so a switch in flight drops the upload.
+    const targetBusinessId = businessId;
+    const previousPreview = logoPreview;
+    setLogoPreview(URL.createObjectURL(file));
+    setLogoUploading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+
+      const res = await apiFetch('/api/business/logo', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || data.error || 'Upload failed');
+      }
+
+      const logoUrl: unknown = data.data?.logoUrl;
+      if (typeof logoUrl !== 'string' || logoUrl === '') {
+        throw new Error('Upload failed');
+      }
+
+      setLogoPreview(logoUrl);
+      updateSettings(
+        { currency: form.currency, timezone: form.timezone, logoUrl },
+        targetBusinessId,
+      );
+      setSuccess('Logo updated');
+    } catch (err) {
+      setLogoPreview(previousPreview);
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setLogoUploading(false);
+    }
+  };
 
   const submitProfile = async (timeZone: string) => {
     // Capture the owner before the request so a switch in flight drops the save.
@@ -137,13 +197,26 @@ export default function SettingsPage() {
       }
 
       const data = await res.json();
-      const saved = data.data as { currency?: unknown; timezone?: unknown };
+      const saved = data.data as {
+        currency?: unknown;
+        timezone?: unknown;
+        name?: unknown;
+        logoUrl?: unknown;
+      };
       const savedTimeZone = TimezoneSchema.safeParse(saved.timezone);
       const nextTimeZone = savedTimeZone.success ? savedTimeZone.data : timeZone;
 
       // The response is untrusted; the provider keeps the last valid value
       // for each field, so the timezone still lands when currency is missing.
-      updateSettings({ currency: saved.currency, timezone: nextTimeZone }, targetBusinessId);
+      updateSettings(
+        {
+          currency: saved.currency,
+          timezone: nextTimeZone,
+          name: saved.name,
+          logoUrl: saved.logoUrl,
+        },
+        targetBusinessId,
+      );
 
       setBaselineTimeZone(nextTimeZone);
       setForm((prev) => ({ ...prev, timezone: nextTimeZone }));
@@ -159,6 +232,7 @@ export default function SettingsPage() {
   };
 
   const saveProfile = () => {
+    setSuccess(null);
     const parsedTimeZone = TimezoneSchema.safeParse(form.timezone);
     if (!parsedTimeZone.success) {
       setError('Choose a valid timezone.');
@@ -184,7 +258,9 @@ export default function SettingsPage() {
   if (isLoading) {
     return (
       <AppShell>
-        <div className="p-8">Loading...</div>
+        <div className="p-8" role="status">
+          <span className="sr-only">Loading...</span>
+        </div>
       </AppShell>
     );
   }
@@ -199,25 +275,55 @@ export default function SettingsPage() {
           </p>
         </div>
 
-        {business?.logoUrl && (
+        <Field
+          label="Business logo"
+          htmlFor="settings-logo-upload"
+          description="JPEG, PNG, or WebP. Max 2MB."
+        >
           <div className="flex items-center gap-4">
-            <Image
-              alt="Business logo"
-              className="h-12 w-12 rounded object-contain"
-              height={48}
-              src={business.logoUrl}
-              unoptimized
-              width={48}
-            />
-            <span className="text-sm text-muted">Logo is set via the onboarding wizard</span>
+            <label
+              className="flex size-24 cursor-pointer items-center justify-center overflow-hidden rounded-lg border-2 border-dashed border-border bg-surface-muted text-center text-sm text-muted hover:bg-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky"
+              htmlFor="settings-logo-upload"
+            >
+              {logoPreview ? (
+                // A local blob preview (or the stored Cloudinary URL) cannot be
+                // fetched by the optimizer, so serve the src as-is.
+                <Image
+                  alt="Business logo"
+                  className="h-20 w-20 rounded object-contain"
+                  height={80}
+                  src={logoPreview}
+                  unoptimized
+                  width={80}
+                />
+              ) : (
+                <span>{logoUploading ? 'Uploading...' : 'Upload a logo'}</span>
+              )}
+              <input
+                accept="image/*"
+                className="sr-only"
+                disabled={logoUploading}
+                id="settings-logo-upload"
+                onChange={handleLogoChange}
+                type="file"
+              />
+            </label>
+            <p className="text-xs text-muted">
+              {logoUploading ? 'Uploading...' : 'Choose an image to replace the current logo.'}
+            </p>
           </div>
-        )}
+        </Field>
 
         {error && <FormMessage id="settings-error">{error}</FormMessage>}
         {success && (
-          <p className="text-sm text-success" role="status">
-            {success}
-          </p>
+          <Alert variant="success">
+            <div className="flex items-center justify-between gap-4">
+              <span>{success}</span>
+              <Button onClick={() => setSuccess(null)} type="button" variant="quiet">
+                Dismiss
+              </Button>
+            </div>
+          </Alert>
         )}
 
         <div className="space-y-6">

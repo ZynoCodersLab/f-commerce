@@ -32,6 +32,38 @@ describe('business settings cache', () => {
     expect(readBusinessSettingsCache('biz-2')).toBeNull();
   });
 
+  it('round-trips the business name and logo', () => {
+    writeBusinessSettingsCache(BUSINESS_ID, {
+      currency: 'USD',
+      timezone: 'Europe/Berlin',
+      name: 'Maya Traders',
+      logoUrl: 'https://res.cloudinary.com/demo/logo.png',
+    });
+
+    expect(readBusinessSettingsCache(BUSINESS_ID)).toEqual({
+      currency: 'USD',
+      timezone: 'Europe/Berlin',
+      name: 'Maya Traders',
+      logoUrl: 'https://res.cloudinary.com/demo/logo.png',
+    });
+  });
+
+  it('drops a stored logo URL that is not http or https', () => {
+    writeBusinessSettingsCache(BUSINESS_ID, {
+      currency: 'USD',
+      timezone: 'Europe/Berlin',
+      name: 'Maya Traders',
+      logoUrl: 'javascript:alert(1)',
+    });
+
+    expect(readBusinessSettingsCache(BUSINESS_ID)).toEqual({
+      currency: 'USD',
+      timezone: 'Europe/Berlin',
+      name: 'Maya Traders',
+      logoUrl: null,
+    });
+  });
+
   it('parses an unchanged entry once', () => {
     writeBusinessSettingsCache(BUSINESS_ID, { currency: 'USD', timezone: 'Europe/Berlin' });
     const RealDateTimeFormat = Intl.DateTimeFormat;

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { IsoDateTimeSchema } from './datetime.js';
+
 /** The status path an order follows, from creation to its final state. */
 export const ORDER_STATUSES = [
   'PENDING',
@@ -190,7 +192,7 @@ export const OrderStatusHistorySchema = z.object({
   toStatus: OrderStatusSchema,
   note: z.string().nullable(),
   changedByName: z.string(),
-  createdAt: z.string(),
+  createdAt: IsoDateTimeSchema,
 });
 
 export const OrderSchema = z.object({
@@ -211,8 +213,8 @@ export const OrderSchema = z.object({
   paidAmount: z.number().int(),
   dueAmount: z.number().int(),
   version: z.number().int(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
+  createdAt: IsoDateTimeSchema,
+  updatedAt: IsoDateTimeSchema,
   items: z.array(OrderItemSchema),
   history: z.array(OrderStatusHistorySchema),
 });
@@ -227,8 +229,8 @@ export const OrderSummarySchema = z.object({
   source: OrderSourceSchema.nullable(),
   deliveryDeadline: z.iso.date().nullable(),
   itemCount: z.number().int(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
+  createdAt: IsoDateTimeSchema,
+  updatedAt: IsoDateTimeSchema,
 });
 
 export const OrderPageSchema = z.object({
@@ -242,7 +244,7 @@ export const DuplicateOrderExistingSchema = z.object({
   orderNumber: z.string(),
   status: OrderStatusSchema,
   total: z.number().int(),
-  createdAt: z.string(),
+  createdAt: IsoDateTimeSchema,
 });
 
 export const DuplicateOrderErrorSchema = z.object({

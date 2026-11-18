@@ -7,6 +7,7 @@ import Home from './page';
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/dashboard',
+  useRouter: () => ({ replace: vi.fn() }),
 }));
 
 describe('seller console foundation', () => {

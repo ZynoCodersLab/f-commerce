@@ -102,6 +102,18 @@ export interface OrderHistoryWrite {
   fromStatus?: OrderStatus | null;
 }
 
+/**
+ * One line's stock movement, applied in the same transaction as the status
+ * change. A sale takes stock for a newly confirmed order; a restoration puts
+ * the same units back when a confirmed order is cancelled or returned.
+ */
+export interface OrderStockMove {
+  kind: 'sale' | 'restoration';
+  productId: string;
+  variantId: string | null;
+  quantity: number;
+}
+
 export interface IOrderRepository {
   findDetailById(id: string): Promise<OrderDetail | null>;
   findDetailByIdempotencyKey(key: string): Promise<OrderDetail | null>;
@@ -130,5 +142,6 @@ export interface IOrderRepository {
     expectedVersion: number,
     status: OrderStatus,
     history: OrderHistoryWrite,
+    stockMoves?: OrderStockMove[],
   ): Promise<OrderDetail | null>;
 }
