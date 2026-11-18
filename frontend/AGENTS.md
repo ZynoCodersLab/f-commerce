@@ -31,6 +31,13 @@ npm run e2e        # Playwright end to end tests
 - Browser code calls the API through relative `/api/...` paths only. Never hardcode a backend host in client code; the Next.js server proxies `/api/*` to `API_ORIGIN`, and `API_ORIGIN` comes from the environment.
 - Read business settings (currency, timezone) from `BusinessSettingsProvider` in `src/components/business/business-settings-provider.tsx`, the one client provider mounted in the root layout. Do not fetch `GET /api/business/me` from a screen just to format money or dates. When the provider gains settings, extend its per-business cache and its auth subscription rather than adding a second request.
 
+## Authentication lifecycle
+
+- `useRequireAuth` returns `ready`. Render nothing until it is true; the server render and hydration both report not ready, so this also prevents a signed out flash.
+- `apiFetch` attaches the stored access token and business id. On a `401` it calls `/api/auth/refresh` once, stores the new access token, and replays the original request once. Auth routes (`/api/auth/...`) are never refreshed.
+- A `400` or `401` from the refresh clears the session, and the guard sends the user to `/login`. An unreachable refresh keeps the session, so a later request can try again.
+- A `403` with `BUSINESS_ACCESS_DENIED` clears the session. `logout` clears the local session even when the API is unreachable.
+
 ## Gotchas
 
 - The dev server defaults to port 3000 for Next and port 4000 for the Express backend.

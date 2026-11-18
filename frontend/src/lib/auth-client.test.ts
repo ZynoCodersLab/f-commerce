@@ -23,6 +23,7 @@ describe('auth-client', () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   describe('setAuth / getAuth', () => {
@@ -220,6 +221,140 @@ describe('auth-client', () => {
       await apiFetch('https://example.com/path');
 
       expect(fetchMock).toHaveBeenCalledWith('https://example.com/path', expect.anything());
+    });
+
+    it('refreshes an expired access token and replays the request once', async () => {
+      setAuth({ accessToken: 'expired', businessId: 'biz-1' });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response('expired', { status: 401 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ accessToken: 'fresh' }), { status: 200 }),
+        )
+        .mockResolvedValueOnce(new Response('ok', { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const response = await apiFetch('/api/orders');
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('ok');
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+
+      const refreshCall = fetchMock.mock.calls[1];
+      expect(refreshCall[0]).toBe('/api/auth/refresh');
+      expect(refreshCall[1]).toMatchObject({ method: 'POST', credentials: 'include' });
+
+      const retryHeaders = (fetchMock.mock.calls[2][1] as RequestInit).headers as Headers;
+      expect(retryHeaders.get('Authorization')).toBe('Bearer fresh');
+      expect(retryHeaders.get('x-business-id')).toBe('biz-1');
+      expect(getAuth()).toEqual({ accessToken: 'fresh', businessId: 'biz-1' });
+    });
+
+    it('shares one refresh across concurrent 401 responses', async () => {
+      setAuth({ accessToken: 'expired', businessId: 'biz-1' });
+
+      let resolveRefresh: (response: Response) => void = () => {};
+      const refreshResponse = new Promise<Response>((resolve) => {
+        resolveRefresh = resolve;
+      });
+      let refreshCalls = 0;
+
+      const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+        if (input === '/api/auth/refresh') {
+          refreshCalls += 1;
+          return refreshResponse;
+        }
+
+        const headers = init?.headers as Headers;
+        const authorized = headers.get('Authorization') === 'Bearer fresh';
+        return Promise.resolve(
+          authorized
+            ? new Response('ok', { status: 200 })
+            : new Response('expired', { status: 401 }),
+        );
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const first = apiFetch('/api/orders');
+      const second = apiFetch('/api/customers');
+
+      await vi.waitFor(() => expect(refreshCalls).toBe(1));
+      resolveRefresh(new Response(JSON.stringify({ accessToken: 'fresh' }), { status: 200 }));
+
+      const [firstResponse, secondResponse] = await Promise.all([first, second]);
+
+      expect(firstResponse.status).toBe(200);
+      expect(secondResponse.status).toBe(200);
+      expect(refreshCalls).toBe(1);
+    });
+
+    it('clears the session when the refresh is rejected', async () => {
+      setAuth({ accessToken: 'expired', businessId: 'biz-1' });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response('expired', { status: 401 }))
+        .mockResolvedValueOnce(new Response('no refresh token', { status: 401 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const response = await apiFetch('/api/orders');
+
+      expect(response.status).toBe(401);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(getAuth()).toBeNull();
+    });
+
+    it('keeps the session when the refresh cannot reach the API', async () => {
+      setAuth({ accessToken: 'expired', businessId: 'biz-1' });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response('expired', { status: 401 }))
+        .mockRejectedValueOnce(new Error('network down'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const response = await apiFetch('/api/orders');
+
+      expect(response.status).toBe(401);
+      expect(getAuth()).toEqual({ accessToken: 'expired', businessId: 'biz-1' });
+    });
+
+    it('does not refresh an auth route', async () => {
+      setAuth({ accessToken: 'tok', businessId: 'biz-1' });
+      const fetchMock = vi.fn().mockResolvedValue(new Response('bad credentials', { status: 401 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const response = await apiFetch('/api/auth/login', { method: 'POST' });
+
+      expect(response.status).toBe(401);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(getAuth()).toEqual({ accessToken: 'tok', businessId: 'biz-1' });
+    });
+
+    it('does not refresh when there is no session', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response('denied', { status: 401 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const response = await apiFetch('/api/business/me');
+
+      expect(response.status).toBe(401);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('replays only once when the refreshed token is still rejected', async () => {
+      setAuth({ accessToken: 'expired', businessId: 'biz-1' });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response('expired', { status: 401 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ accessToken: 'fresh' }), { status: 200 }),
+        )
+        .mockResolvedValueOnce(new Response('still expired', { status: 401 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const response = await apiFetch('/api/orders');
+
+      expect(response.status).toBe(401);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(getAuth()?.accessToken).toBe('fresh');
     });
 
     // covers AC-15: a removed member loses the session on the next business request.

@@ -115,14 +115,130 @@ async function clearSessionOnBusinessAccessDenied(response: Response): Promise<v
   }
 }
 
-export async function apiFetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
+type RefreshResult =
+  | { outcome: 'refreshed'; accessToken: string }
+  | { outcome: 'rejected' }
+  | { outcome: 'unavailable' };
+
+/**
+ * One refresh at a time per tab. Concurrent 401 responses await the same
+ * request, so several panels do not rotate the refresh token several times.
+ */
+let refreshInFlight: Promise<RefreshResult> | null = null;
+
+function requestPath(input: RequestInfo): string {
+  const url = typeof input === 'string' ? input : input.url;
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    try {
+      return new URL(url).pathname;
+    } catch {
+      return url;
+    }
+  }
+  return url.split('?')[0];
+}
+
+/**
+ * Auth routes answer 401 for a bad credential or an expired refresh cookie.
+ * That is the answer the caller asked for, so it must not trigger a refresh
+ * and replay the request.
+ */
+function isAuthEndpoint(input: RequestInfo): boolean {
+  return requestPath(input).startsWith('/api/auth/');
+}
+
+async function readAccessToken(response: Response): Promise<string | null> {
+  try {
+    const payload: unknown = await response.json();
+    if (typeof payload !== 'object' || payload === null) return null;
+    const token = (payload as { accessToken?: unknown }).accessToken;
+    return typeof token === 'string' && token.length > 0 ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+async function requestRefresh(): Promise<RefreshResult> {
+  const session = getAuth();
+  if (!session) return { outcome: 'rejected' };
+
+  let response: Response;
+  try {
+    response = await fetchWithTimeout('/api/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+    });
+  } catch {
+    // The API could not be reached or the request timed out. Keep the session:
+    // the refresh cookie may still be valid when the API returns.
+    return { outcome: 'unavailable' };
+  }
+
+  if (response.status === 400 || response.status === 401) {
+    return { outcome: 'rejected' };
+  }
+  if (!response.ok) {
+    return { outcome: 'unavailable' };
+  }
+
+  const accessToken = await readAccessToken(response);
+  if (!accessToken) {
+    return { outcome: 'unavailable' };
+  }
+
+  // A sign out or a business switch while the refresh was in flight wins.
+  const active = getAuth();
+  if (!active || active.businessId !== session.businessId) {
+    return { outcome: 'rejected' };
+  }
+
+  // The user and business are unchanged, so only the token moves. Do not
+  // notify auth listeners: a token refresh must not reload business settings.
+  localStorage.setItem(TOKEN_KEY, accessToken);
+  return { outcome: 'refreshed', accessToken };
+}
+
+function refreshSession(): Promise<RefreshResult> {
+  if (!refreshInFlight) {
+    refreshInFlight = requestRefresh()
+      .catch((): RefreshResult => ({ outcome: 'unavailable' }))
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
+async function sendWithAuth(input: RequestInfo, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
   const authHeaders = getAuthHeaders();
   Object.entries(authHeaders).forEach(([key, value]) => {
     headers.set(key, value);
   });
 
-  const response = await fetchWithTimeout(input, { ...init, headers });
+  return fetchWithTimeout(input, { ...init, headers });
+}
+
+/**
+ * Adds the session headers and sends the request. A 401 refreshes the access
+ * token once and replays the request once. A rejected refresh clears the
+ * session; an unreachable refresh keeps it, so a later request can try again.
+ * Auth routes are never refreshed, because their 401 is the answer the caller
+ * asked for.
+ */
+export async function apiFetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
+  let response = await sendWithAuth(input, init);
+
+  if (response.status === 401 && getAuth() && !isAuthEndpoint(input)) {
+    const refresh = await refreshSession();
+    if (refresh.outcome === 'refreshed') {
+      response = await sendWithAuth(input, init);
+    } else if (refresh.outcome === 'rejected' && getAuth()) {
+      // A sign out may have won while the refresh was in flight.
+      clearAuth();
+    }
+  }
+
   await clearSessionOnBusinessAccessDenied(response);
   return response;
 }
