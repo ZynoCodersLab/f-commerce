@@ -64,7 +64,7 @@ describe('SettingsPage', () => {
       </ThemeBoundary>,
     );
 
-    expect(screen.getByText('Loading...')).toBeVisible();
+    expect(screen.getByText('Loading...')).toHaveClass('sr-only');
     // The shell renders while the profile loads, so the page never jumps
     // between a bare screen and the sidebar layout.
     expect(screen.getByRole('complementary', { name: /sidebar/i })).toBeVisible();

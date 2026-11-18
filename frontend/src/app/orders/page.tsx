@@ -16,7 +16,6 @@ import {
   Input,
   RecordCard,
   Skeleton,
-  Spinner,
 } from '@/components/ui/primitives';
 import { OrderStatusBadge } from '@/components/orders/order-status';
 import { OrderDeadlineCell } from '@/components/orders/order-deadline';
@@ -323,12 +322,6 @@ export default function OrdersPage() {
             <Skeleton className="h-20 w-full" />
             <Skeleton className="h-20 w-full" />
           </div>
-        )}
-
-        {isLoading && rows.length > 0 && (
-          <p className="flex items-center gap-2 text-sm text-muted" role="status">
-            <Spinner /> Loading orders…
-          </p>
         )}
 
         {error !== null && <ErrorState onRetry={retry}>{error}</ErrorState>}

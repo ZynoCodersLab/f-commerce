@@ -125,13 +125,13 @@ export default function CustomersPage() {
   );
 
   const goToNext = () => {
-    if (!page.nextCursor) return;
+    if (!page.nextCursor || isLoading) return;
     setIsLoading(true);
     void loadFrom(page.nextCursor, true);
   };
 
   const goToPrevious = () => {
-    if (pageStack.length <= 1) return;
+    if (pageStack.length <= 1 || isLoading) return;
     const stack = pageStack.slice(0, -1);
     setPageStack(stack);
     setPage(stack[stack.length - 1]);
@@ -368,7 +368,7 @@ export default function CustomersPage() {
             className="flex items-center justify-between border-t border-border pt-4"
           >
             <Button
-              disabled={pageStack.length <= 1}
+              disabled={pageStack.length <= 1 || isLoading}
               onClick={goToPrevious}
               type="button"
               variant="secondary"
@@ -377,7 +377,7 @@ export default function CustomersPage() {
             </Button>
             <span className="font-mono text-sm text-muted">Page {pageNumber}</span>
             <Button
-              disabled={!page.nextCursor}
+              disabled={!page.nextCursor || isLoading}
               onClick={goToNext}
               type="button"
               variant="secondary"

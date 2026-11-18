@@ -95,7 +95,7 @@ describe('OnboardingPage', () => {
       </ThemeBoundary>,
     );
 
-    expect(screen.getByText(/loading your profile/i)).toBeVisible();
+    expect(screen.getByText(/loading your profile/i)).toHaveClass('sr-only');
   });
 
   it('shows an error when the business profile cannot be loaded', async () => {

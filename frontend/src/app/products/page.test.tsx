@@ -226,6 +226,7 @@ describe('ProductsPage', () => {
 
     const loading = screen.getByText('Loading products…');
     expect(loading.closest('[role="status"]')).not.toBeNull();
+    expect(loading).toHaveClass('sr-only');
   });
 
   it('shows the empty catalog state and the add action', async () => {

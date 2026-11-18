@@ -247,7 +247,13 @@ export default function OnboardingPage() {
     // what the seller has typed.
   }, [router]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!ready) return <div className="p-8">Loading your profile...</div>;
+  if (!ready) {
+    return (
+      <div className="p-8" role="status">
+        <span className="sr-only">Loading your profile...</span>
+      </div>
+    );
+  }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -360,7 +366,11 @@ export default function OnboardingPage() {
   };
 
   if (isLoading) {
-    return <div className="p-8">Loading your profile...</div>;
+    return (
+      <div className="p-8" role="status">
+        <span className="sr-only">Loading your profile...</span>
+      </div>
+    );
   }
 
   if (business?.onboardingComplete) {

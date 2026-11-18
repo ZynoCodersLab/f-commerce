@@ -114,7 +114,9 @@ export default function SettingsPage() {
   if (!ready) {
     return (
       <AppShell>
-        <div className="p-8">Loading...</div>
+        <div className="p-8" role="status">
+          <span className="sr-only">Loading...</span>
+        </div>
       </AppShell>
     );
   }
@@ -256,7 +258,9 @@ export default function SettingsPage() {
   if (isLoading) {
     return (
       <AppShell>
-        <div className="p-8">Loading...</div>
+        <div className="p-8" role="status">
+          <span className="sr-only">Loading...</span>
+        </div>
       </AppShell>
     );
   }
