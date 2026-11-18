@@ -7,7 +7,8 @@ import { setAuth } from '@/lib/auth-client';
 import { AppShell } from './shell';
 
 // The shell only reads settings; the provider has its own suite.
-const { replaceMock, settings } = vi.hoisted(() => ({
+const { nav, replaceMock, settings } = vi.hoisted(() => ({
+  nav: { pathname: '/dashboard' },
   replaceMock: vi.fn(),
   settings: {
     currency: '',
@@ -19,7 +20,7 @@ const { replaceMock, settings } = vi.hoisted(() => ({
 }));
 
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/dashboard',
+  usePathname: () => nav.pathname,
   useRouter: () => ({ replace: replaceMock }),
 }));
 
@@ -41,6 +42,7 @@ describe('AppShell business day', () => {
   beforeEach(() => {
     window.localStorage.clear();
     replaceMock.mockClear();
+    nav.pathname = '/dashboard';
     settings.currency = '';
     settings.timezone = 'Asia/Dhaka';
     settings.name = 'Maya Traders';
@@ -142,6 +144,25 @@ describe('AppShell business day', () => {
 
     await user.click(within(sheet).getByRole('button', { name: /close/i }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  // The deeper team route lives inside settings, so only the team link is current.
+  it('marks only the deepest nav match active on a nested page', async () => {
+    nav.pathname = '/settings/team';
+    const user = userEvent.setup();
+
+    renderShell();
+
+    await user.click(screen.getByRole('button', { name: /open navigation/i }));
+
+    const sheet = screen.getByRole('dialog', { name: /more/i });
+    expect(within(sheet).getByRole('link', { name: /team/i })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(within(sheet).getByRole('link', { name: /settings/i })).not.toHaveAttribute(
+      'aria-current',
+    );
   });
 
   // covers AC-9: the header date follows the business zone, not the browser zone.

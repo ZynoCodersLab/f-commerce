@@ -51,21 +51,24 @@ const secondaryRoutes: RouteItem[] = [
   { href: '/settings/team', label: 'Team', icon: UsersRound },
 ];
 
-function isRouteActive(pathname: string, href: string) {
-  return pathname === href || pathname.startsWith(`${href}/`);
+function activeHref(pathname: string, items: RouteItem[]): string | null {
+  let active: string | null = null;
+  for (const item of items) {
+    if (pathname !== item.href && !pathname.startsWith(`${item.href}/`)) continue;
+    if (!active || item.href.length > active.length) active = item.href;
+  }
+  return active;
 }
 
 function RouteLink({
+  active,
   item,
   mobile = false,
-  pathname,
 }: {
+  active: boolean;
   item: RouteItem;
   mobile?: boolean;
-  pathname: string;
 }) {
-  const active = isRouteActive(pathname, item.href);
-
   return (
     <NextLink
       aria-current={active ? 'page' : undefined}
@@ -104,6 +107,8 @@ function MoreMenu({
   onLogout: () => void;
   pathname: string;
 }) {
+  const currentHref = activeHref(pathname, secondaryRoutes);
+
   return (
     <div className="grid gap-2">
       <p className="text-sm text-body">
@@ -112,7 +117,7 @@ function MoreMenu({
       <nav aria-label="Secondary navigation" className="grid gap-1">
         {secondaryRoutes.map((item) => (
           <div key={item.href} onClick={onClose}>
-            <RouteLink item={item} pathname={pathname} />
+            <RouteLink active={currentHref === item.href} item={item} />
           </div>
         ))}
       </nav>
@@ -158,6 +163,7 @@ function BusinessLogo({ logoUrl, name }: { logoUrl: string | null; name: string 
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const currentHref = activeHref(pathname, routes);
   const router = useRouter();
   const [moreOpen, setMoreOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -197,7 +203,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
         <nav aria-label="Primary navigation" className="grid gap-1">
           {routes.map((item) => (
-            <RouteLink item={item} key={item.href} pathname={pathname} />
+            <RouteLink active={currentHref === item.href} item={item} key={item.href} />
           ))}
           <button
             className="flex min-h-11 items-center gap-3 rounded-md px-3 text-left text-sm font-semibold text-body transition-colors hover:bg-surface-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky"
@@ -280,7 +286,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-border bg-surface/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 backdrop-blur lg:hidden"
         >
           {routes.map((item) => (
-            <RouteLink item={item} key={item.href} mobile pathname={pathname} />
+            <RouteLink active={currentHref === item.href} item={item} key={item.href} mobile />
           ))}
           <button
             className="flex min-h-11 flex-col items-center justify-center gap-1 rounded-md text-xs font-semibold text-body focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky"
