@@ -28,8 +28,17 @@ npm run e2e        # Playwright end to end tests
 - Use named exports only; no `any` types.
 - Prefer server components for data fetching; stream data to the client.
 - Design system: build all UI to `design.md` (art direction and the maximalist product bar); token values live in CSS.
+- Styling: Tailwind CSS v4 is configured in `src/app/globals.css` with `@import 'tailwindcss'`, not a JavaScript config. Use the semantic tokens exposed there (`bg-canvas`, `bg-surface`, `bg-surface-muted`, `text-ink`, `text-body`, `text-muted`, `border-border`, `text-sky`, `bg-sky-soft`, and the success, warning, and danger tokens) instead of raw colors or arbitrary values. Dark mode is the `data-theme='dark'` variable set; do not add `dark:` variants. There is no `cn` helper, so build class strings with template literals and keep static classes literal. Compose screens from `src/components/ui/primitives.tsx` before adding a new primitive.
+- Icons: import named icons from `lucide-react`. Decorative icons get `aria-hidden="true"` and an explicit size, 18 in navigation and 16 inline. An icon only control uses `IconButton` with a `label`; the icon never carries the accessible name. The `lucide-icons` skill covers advanced usage.
 - Browser code calls the API through relative `/api/...` paths only. Never hardcode a backend host in client code; the Next.js server proxies `/api/*` to `API_ORIGIN`, and `API_ORIGIN` comes from the environment.
 - Read business settings (currency, timezone) from `BusinessSettingsProvider` in `src/components/business/business-settings-provider.tsx`, the one client provider mounted in the root layout. Do not fetch `GET /api/business/me` from a screen just to format money or dates. When the provider gains settings, extend its per-business cache and its auth subscription rather than adding a second request.
+
+## Authentication lifecycle
+
+- `useRequireAuth` returns `ready`. Render nothing until it is true; the server render and hydration both report not ready, so this also prevents a signed out flash.
+- `apiFetch` attaches the stored access token and business id. On a `401` it calls `/api/auth/refresh` once, stores the new access token, and replays the original request once. Auth routes (`/api/auth/...`) are never refreshed.
+- A `400` or `401` from the refresh clears the session, and the guard sends the user to `/login`. An unreachable refresh keeps the session, so a later request can try again.
+- A `403` with `BUSINESS_ACCESS_DENIED` clears the session. `logout` clears the local session even when the API is unreachable.
 
 ## Gotchas
 
