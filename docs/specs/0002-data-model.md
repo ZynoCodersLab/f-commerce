@@ -147,7 +147,7 @@ The tradeoff is operational complexity - more collections to manage and query co
 
 ## Follow-up
 
-- [x] Confirm Mongoose schema design with `/architect data model` to generate acceptance criteria and build tasks
-- [x] Set up MongoDB indexing strategy for tenant isolation and common queries
-- [ ] Document the query patterns needed for each feature (reports, dashboards, customer history)
-- [ ] Plan for data migration if existing pilot data needs to be imported into new structure
+- [x] ~~Confirm Mongoose schema design with `/architect data model` to generate acceptance criteria and build tasks~~ Superseded by PostgreSQL and Drizzle; see the 2026-10-18 note above.
+- [x] ~~Set up MongoDB indexing strategy for tenant isolation and common queries~~ Superseded by the PostgreSQL indexes in the Drizzle schema.
+- [x] ~~Document the query patterns needed for each feature (reports, dashboards, customer history)~~ Each shipped feature documents its query patterns in its own spec and Drizzle repository (specs 0005 through 0009). Reports and dashboards will document theirs when built.
+- [x] ~~Plan for data migration if existing pilot data needs to be imported into new structure~~ Not applicable: the PostgreSQL database started empty and there is no pilot export. Reopen only if a real export appears.

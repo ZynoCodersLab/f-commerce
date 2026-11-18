@@ -225,8 +225,8 @@ A feature may add a local visual token only when the value is specific to its do
 
 ## Follow-up
 
-- [ ] Create `frontend/design.md` as the human readable token and component language source
-- [ ] Add Tailwind CSS, its Next.js build integration, `lucide-react`, DM Sans, and IBM Plex Mono during implementation
-- [ ] Capture Tailwind and Lucide conventions in `frontend/AGENTS.md` before implementation begins
-- [ ] Define authentication loading and failure integration points when the authentication feature is designed
-- [ ] Recheck the backend scaffold smoke test timeout before the next foundation verification
+- [x] Create `frontend/design.md` as the human readable token and component language source
+- [x] Add Tailwind CSS, its Next.js build integration, `lucide-react`, DM Sans, and IBM Plex Mono during implementation
+- [x] Capture Tailwind and Lucide conventions in `frontend/AGENTS.md` before implementation begins. The conventions are in `frontend/AGENTS.md` under Conventions.
+- [x] Define authentication loading and failure integration points when the authentication feature is designed. The lifecycle is in `frontend/AGENTS.md`, with refresh and replay in `frontend/src/lib/auth-client.ts` and the guard in `frontend/src/lib/auth-guard.ts`.
+- [x] Recheck the backend scaffold smoke test timeout before the next foundation verification. `backend/src/server.test.ts` starts the server and waits with a bounded timeout.

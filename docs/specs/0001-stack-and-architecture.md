@@ -179,7 +179,7 @@ GitHub Actions runs on pull requests and the default branch. Frontend changes ru
 ## Follow-up
 
 - [ ] Reconcile workspace commands and paths in `AGENTS.md` after the scaffold is up.
-- [ ] Set up CORS config early (the first cross-origin request will fail without it).
+- [x] Set up CORS config early (the first cross-origin request will fail without it). Configured from `CORS_ORIGINS` in `backend/src/server.ts`; the browser also reaches the API through the Next.js `/api/*` proxy.
 - [ ] Add workspace aware CI path filters so unaffected checks are skipped.
 - [x] Read the API origin from `API_ORIGIN` in `frontend/next.config.ts` instead of the hardcoded `http://localhost:4000`. The config defaults to `http://localhost:4000` for local development, trims trailing slashes, and fails a production build when the value is missing or is not an absolute `http` or `https` URL.
 - [x] Build the `packages/contracts` workspace before either application build in every path, so a fresh install can start the API. The root `workspaces` array lists `packages/contracts` first. Each application also declares `prebuild`, and the backend `predev` and `pretest`, so a single-workspace build or dev start cannot miss the contracts build.
