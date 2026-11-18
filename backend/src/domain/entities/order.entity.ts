@@ -27,17 +27,32 @@ export const STOCK_RELEASING_STATUSES: OrderStatus[] = [
 ];
 
 /**
+ * Statuses an order occupies after its sale has taken stock. A return is only
+ * reachable from SHIPPED or DELIVERED, never straight from CONFIRMED, so the
+ * restore has to fire from every status on this path.
+ */
+export const STOCK_HELD_STATUSES: OrderStatus[] = [
+  OrderStatus.CONFIRMED,
+  OrderStatus.PROCESSING,
+  OrderStatus.SHIPPED,
+  OrderStatus.DELIVERED,
+];
+
+/**
  * Which way a single status change moves stock, or null when it moves none.
- * Sale: the order is being confirmed. Restoration: a confirmed order is being
- * cancelled or returned. A return that never sold anything, such as
- * PENDING -> CANCELLED, has nothing to restore.
+ * Sale: the order is being confirmed. Restoration: an order whose sale already
+ * took stock is being cancelled or returned, which includes the normal
+ * CONFIRMED -> PROCESSING -> SHIPPED -> RETURNED path. A return that never
+ * sold anything, such as PENDING -> CANCELLED, has nothing to restore.
  */
 export function getStockMovement(
   from: OrderStatus,
   to: OrderStatus,
 ): 'sale' | 'restoration' | null {
   if (to === STOCK_RESERVED_STATUS && from !== STOCK_RESERVED_STATUS) return 'sale';
-  if (from === STOCK_RESERVED_STATUS && STOCK_RELEASING_STATUSES.includes(to)) return 'restoration';
+  if (STOCK_HELD_STATUSES.includes(from) && STOCK_RELEASING_STATUSES.includes(to)) {
+    return 'restoration';
+  }
   return null;
 }
 

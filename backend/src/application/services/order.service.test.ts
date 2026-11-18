@@ -119,11 +119,28 @@ describe('OrderService.changeStatus stock', () => {
     expect(movesOf(repository)).toEqual([]);
   });
 
-  it('leaves stock alone on moves after confirmation', async () => {
+  it('puts the same stock back when a shipped order is returned', async () => {
     const repository = repositoryFor(detail(OrderStatus.SHIPPED, lines));
     const service = new OrderService(repository);
 
     await service.changeStatus(ORDER_ID, change(OrderStatus.RETURNED), actor);
+
+    expect(movesOf(repository)).toEqual([
+      { kind: 'restoration', productId: lines[0].productId, variantId: null, quantity: 2 },
+      {
+        kind: 'restoration',
+        productId: lines[1].productId,
+        variantId: lines[1].variantId,
+        quantity: 1,
+      },
+    ]);
+  });
+
+  it('leaves stock alone while a confirmed order moves through processing', async () => {
+    const repository = repositoryFor(detail(OrderStatus.CONFIRMED, lines));
+    const service = new OrderService(repository);
+
+    await service.changeStatus(ORDER_ID, change(OrderStatus.PROCESSING), actor);
 
     expect(movesOf(repository)).toEqual([]);
   });

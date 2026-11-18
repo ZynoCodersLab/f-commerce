@@ -682,8 +682,7 @@ export class DrizzleOrderRepository implements IOrderRepository {
    * Move stock for every line of a confirmed order inside the status
    * transaction. A sale decrements the stocked level; a restoration credits
    * the same level back by the same amount, so a round trip always nets zero.
-   * Lines on a product without variants adjust the product, and variant lines
-   * adjust the variant and its product, so the total the UI shows stays right.
+   * The level is the variant when the line names one, otherwise the product.
    */
   private async applyStockMoves(
     tx: DbTransaction,
@@ -694,6 +693,9 @@ export class DrizzleOrderRepository implements IOrderRepository {
     for (const move of moves) {
       const delta = move.kind === 'sale' ? -move.quantity : move.quantity;
 
+      // Stock lives at exactly one level per product: on the variant when the
+      // line names one, otherwise on the product itself. Adjusting both would
+      // let a variant product's unused product level drift away from zero.
       if (move.variantId) {
         await tx
           .update(productVariants)
@@ -701,15 +703,15 @@ export class DrizzleOrderRepository implements IOrderRepository {
           .where(
             and(eq(productVariants.id, move.variantId), eq(productVariants.businessId, businessId)),
           );
+      } else {
+        await tx
+          .update(products)
+          .set({
+            stockCount: sql`greatest(${products.stockCount} + ${delta}, 0)`,
+            updatedAt: sql`now()`,
+          })
+          .where(and(eq(products.id, move.productId), eq(products.businessId, businessId)));
       }
-
-      await tx
-        .update(products)
-        .set({
-          stockCount: sql`greatest(${products.stockCount} + ${delta}, 0)`,
-          updatedAt: sql`now()`,
-        })
-        .where(and(eq(products.id, move.productId), eq(products.businessId, businessId)));
 
       await tx.insert(inventoryTransactions).values({
         businessId,

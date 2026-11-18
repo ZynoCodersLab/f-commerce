@@ -45,18 +45,46 @@ describe('getStockMovement', () => {
     expect(getStockMovement(OrderStatus.CONFIRMED, OrderStatus.CANCELLED)).toBe('restoration');
   });
 
-  // covers AC-3: progress after CONFIRMED never touches stock again
-  it('leaves stock alone for moves out of later statuses', () => {
-    expect(getStockMovement(OrderStatus.SHIPPED, OrderStatus.RETURNED)).toBeNull();
-    expect(getStockMovement(OrderStatus.DELIVERED, OrderStatus.RETURNED)).toBeNull();
+  // covers AC-3: progress after CONFIRMED never touches stock until a release
+  it('leaves stock alone while an order progresses to shipping', () => {
     expect(getStockMovement(OrderStatus.CONFIRMED, OrderStatus.PROCESSING)).toBeNull();
     expect(getStockMovement(OrderStatus.PROCESSING, OrderStatus.SHIPPED)).toBeNull();
+    expect(getStockMovement(OrderStatus.SHIPPED, OrderStatus.DELIVERED)).toBeNull();
   });
 
-  // covers AC-4: a return that never sold anything restores nothing
-  it('leaves stock alone when an unconfirmed order is cancelled', () => {
+  // covers AC-3: a return arrives from SHIPPED or DELIVERED, not from CONFIRMED
+  it('restores stock when a shipped or delivered order is returned', () => {
+    expect(getStockMovement(OrderStatus.SHIPPED, OrderStatus.RETURNED)).toBe('restoration');
+    expect(getStockMovement(OrderStatus.DELIVERED, OrderStatus.RETURNED)).toBe('restoration');
+  });
+
+  // covers AC-4: cancelling after the sale put stock back too
+  it('restores stock when a processing order is cancelled', () => {
+    expect(getStockMovement(OrderStatus.PROCESSING, OrderStatus.CANCELLED)).toBe('restoration');
+  });
+
+  // covers AC-4: a cancelation that never sold anything restores nothing
+  it('leaves stock alone when a pending order is cancelled', () => {
     expect(getStockMovement(OrderStatus.PENDING, OrderStatus.CANCELLED)).toBeNull();
-    expect(getStockMovement(OrderStatus.PROCESSING, OrderStatus.CANCELLED)).toBeNull();
+  });
+
+  // covers AC-5: the real delivery path starts at 0 stock and ends where it began
+  it('nets zero across a full confirm, ship and return round trip', () => {
+    const path: OrderStatus[] = [
+      OrderStatus.PENDING,
+      OrderStatus.CONFIRMED,
+      OrderStatus.PROCESSING,
+      OrderStatus.SHIPPED,
+      OrderStatus.RETURNED,
+    ];
+    let net = 0;
+    for (let i = 0; i < path.length - 1; i += 1) {
+      expect(ORDER_TRANSITIONS[path[i]]).toContain(path[i + 1]);
+      const movement = getStockMovement(path[i], path[i + 1]);
+      if (movement === 'sale') net -= 1;
+      if (movement === 'restoration') net += 1;
+    }
+    expect(net).toBe(0);
   });
 
   // covers AC-5: every legal transition moves stock in the agreed direction
