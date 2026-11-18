@@ -62,7 +62,7 @@ The following acceptance criteria are verified at the backend level through 245 
 - 245 backend tests pass across 17 files
 - 55 frontend tests pass across 7 files
 - Index plan tests in `customer.repository.integration.test.ts` execute without environment variables
-- Atlas index creation and the `version` backfill are pending for the real target database
+- ~~Atlas index creation and the `version` backfill are pending for the real target database~~ Superseded by the PostgreSQL migration. `customers.version` ships `integer NOT NULL DEFAULT 1` in `backend/src/infrastructure/database/drizzle/schema.ts:146`, so there is no backfill, and the migration creates the indexes `customers_business_phone_unq`, `customers_business_lower_name_idx`, and `customers_business_archived_name_idx`. No Atlas step remains.
 
 ## Bug fix verified
 

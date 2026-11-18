@@ -392,8 +392,8 @@ The project uses Tracer Bullet. The first slice stands up one thin invite path t
 
 ## Follow-up
 
-- [ ] Add the installed `resend`, `email-best-practices`, `redis-connections`, `redis-observability`, `redis-core`, and `bullmq-specialist` skills to the root `AGENTS.md` `## Agent skills` section.
-- [ ] Connect the selected MCP servers in your OpenCode MCP configuration: Resend MCP (`npx -y resend-mcp` with `RESEND_API_KEY`), Redis MCP (`uvx --from redis-mcp-server@latest redis-mcp-server --url $REDIS_URL`), and Playwright MCP (`npx @playwright/mcp@latest`). Connecting is a user config step, not a code change.
+- [x] Add the installed `resend`, `email-best-practices`, `redis-connections`, `redis-observability`, `redis-core`, and `bullmq-specialist` skills to the root `AGENTS.md` `## Agent skills` section. All six are listed there.
+- [ ] Connect the selected MCP servers in your OpenCode MCP configuration: Resend MCP (`npx -y resend-mcp` with `RESEND_API_KEY`), Redis MCP (`uvx --from redis-mcp-server@latest redis-mcp-server --url $REDIS_URL`), and Playwright MCP (`npx @playwright/mcp@latest`). This is user configuration, not repo work, so it cannot be verified from the repository.
 - [ ] Consider Resend bounce and complaint webhooks so a delivered invite that bounces is marked failed.
 - [ ] Consider a retention or cleanup job for accepted, revoked, and expired invitations.
 - [ ] Consider a worker health probe for hosts that require one.

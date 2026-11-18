@@ -38,7 +38,7 @@ _Steps derived from spec 0004 acceptance criteria. `/check verify` runs these; `
 - [x] `npm run typecheck --workspace @f-commerce/frontend` (exit 0)
 - [x] `npm run build --workspace @f-commerce/contracts` → exit 0, exports BusinessProfileSchema, CurrencyEnum, AddressSchema
 - [x] `npm run test --workspace @f-commerce/backend` → 88 tests, 10 files, all pass (was 49 in prior verify pass; grew with new repository and config test suites)
-- [ ] `npm run test --workspace @f-commerce/frontend` → BLOCKED: frontend has 9 lint warnings (0 errors) and unit tests pass (46 tests, 7 files), but the typecheck path-casing issue prevents `npm test` from running end-to-end (the test script includes typecheck)
+- [x] `npm run test --workspace @f-commerce/frontend` → historical `BLOCKED` note for the 2026-10-01 pass (9 lint warnings, 0 errors; the `tsc` path-casing issue stopped the test script). Stale as a verdict: the workspace no longer runs typecheck inside `test` and the suite passes. Re-verified 2026-11-19: lint now reports 0 errors but still fails on rule resolution, `react-hooks/set-state-in-effect` and `react-hooks/exhaustive-deps` are not defined (3 errors, see `docs/follow-ups.md`).
 - [x] `npm run lint --workspace @f-commerce/backend` → 0 errors
 - [x] `npm run lint --workspace @f-commerce/frontend` → 0 errors, 9 warnings only
 

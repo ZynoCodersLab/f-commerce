@@ -239,7 +239,7 @@ Notes: Images can also be set by PATCH with Cloudinary URLs already uploaded, th
 
 ## Follow-up
 
-- [ ] Row 9 (orders) must reject new orders for an archived product and may need a per variant stock check, and order items may need to snapshot the exact variant chosen with its price and sku
+- [x] Row 9 (orders) must reject new orders for an archived product, and order items must snapshot the exact variant chosen with its price and sku. Closed by spec 0007 AC-13 and the order line snapshot columns. The per variant stock check stays with planned inventory (see the Row 11 item below).
 - [ ] Row 11 (inventory) will build transaction history on top of product stockCount or variant stockCount, so consider locking or version checks when inventory movements land
 - [ ] Row 16 (search) may add contains search with a trigram or full text index if prefix search proves limiting
 - [ ] Consider a partial unique index that releases an archived product sku for reuse only if product policy changes, the current spec keeps archived skus reserved so restore never collides

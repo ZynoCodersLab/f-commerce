@@ -197,6 +197,6 @@ Successful bodies use the endpoint-specific payloads. Errors use `{ "error": "<C
 ## Follow-up
 
 - [ ] Revisit phone reuse only if product policy changes. Releasing archived numbers requires a partial unique index on live records and makes the `PHONE_IN_USE` restore guard reachable.
-- [ ] Row 9 (orders) must reject new orders for archived customers.
+- [x] Row 9 (orders) must reject new orders for archived customers. Closed by spec 0007 AC-13, which returns 409 `CUSTOMER_ARCHIVED` on create and on edit.
 - [ ] Row 16 (search and filters) adds contains match search with a text index.
 - [ ] Confirm that `STAFF` can see customer notes (default in this spec: yes).

@@ -1,4 +1,1 @@
-- use logo placed in the frontend/public/logo.png - done
-- update logo from settings page - done
-- when A order confirmed, that product should decreaseUpdate the product count after an order is confirmed or returned - done
-- Type createdAt/updatedAt in packages/contracts/src/customer.ts, order.ts, and product.ts instead of z.string() (confirmed still strings) -done
+next task: Fix the undefined ESLint rules in the frontend config

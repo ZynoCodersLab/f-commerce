@@ -4,7 +4,7 @@ Run these checks after the build. Each section names the acceptance criteria it 
 
 ## Setup
 
-- [ ] `docker compose up -d postgres redis` starts both services. Verifies **AC-23**.
+- [x] `docker compose up -d postgres redis` starts both services. Verifies **AC-23**. Re-verified 2026-11-19.
 - [x] `npm ci` installs the workspace dependencies.
 - [x] `npm run build --workspace @f-commerce/contracts` succeeds.
 - [x] `npm run db:migrate --workspace @f-commerce/backend` applies migrations `0007` and `0008` to a clean database. Verifies **AC-22**.
@@ -32,7 +32,7 @@ Run these checks after the build. Each section names the acceptance criteria it 
 - [x] Stop Redis, create an invite, and confirm it is still created with `emailStatus: "FAILED"` and `emailError: "QUEUE_UNAVAILABLE"`, with the copy link working. Start Redis and resend. Verifies **AC-4**, **AC-12**.
 - [x] With no `RESEND_API_KEY` in development, create an invite and confirm `emailStatus: "SKIPPED"`, no `emailError`, and a working copy link. Verifies **AC-4**.
 - [x] Start the API with `NODE_ENV=production` and no `RESEND_API_KEY` and confirm it exits with a clear message; repeat with no `EMAIL_FROM`. Start the worker the same way and confirm it exits with the same messages. Verifies **AC-4**, **AC-23**.
-- [ ] Send `SIGTERM` to the worker while a job runs: it drains the active job, closes Redis and the database, and exits 0 (SIGINT behaves the same). Verifies **AC-23**.
+- [x] Send `SIGTERM` to the worker while a job runs: it drains the active job, closes Redis and the database, and exits 0 (SIGINT behaves the same). Verifies **AC-23**. Verified 2026-11-12 by emitting the `SIGTERM` event in the worker process; Windows cannot deliver an external POSIX signal.
 
 ## Team list
 
