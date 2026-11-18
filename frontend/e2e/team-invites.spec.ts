@@ -83,7 +83,10 @@ test.describe('team and staff invites', () => {
     // together, so an unscoped .first() can resolve the hidden row and fail.
     await expect(page.getByText(invitee).filter({ visible: true }).first()).toBeVisible();
     await expect(
-      page.getByText(/^(not emailed|sending|email sent)$/i).filter({ visible: true }).first(),
+      page
+        .getByText(/^(not emailed|sending|email sent)$/i)
+        .filter({ visible: true })
+        .first(),
     ).toBeVisible();
 
     // The public page describes the invitation before asking for a password.
