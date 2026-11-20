@@ -11,9 +11,14 @@ Last reviewed: 2026-11-19.
 
 ## P0: before the next feature
 
-- [ ] **Rate-limit team member mutations.** `PATCH /api/team/members/:id` and
-      `DELETE /api/team/members/:id` have no limiter. Cancel-invite (`DELETE /api/team/invitations/:id`)
-      has none either. Effort: S. Source: `docs/scope/scope.md:347`, `backend/src/presentation/controllers/team.controller.ts:229`.
+- [x] **Rate-limit team member mutations.** Done 2026-11-21. Added `teamMutationRateLimiter`
+      (`team-mutation`, 30 requests per 15 minutes per owner on the shared Redis store with
+      in-process fail-open fallback) after `requireBusinessRole(OWNER_ONLY)` on
+      `DELETE /api/team/invitations/:id`, `PATCH /api/team/members/:id`, and
+      `DELETE /api/team/members/:id`, kept separate from `inviteWriteRateLimiter`. Surfaced
+      `RATE_LIMITED` feedback in `frontend/src/app/settings/team/page.tsx` and locked with route
+      and Redis cross-instance tests. Source: `docs/scope/scope.md:347`,
+      `backend/src/presentation/controllers/team.controller.ts:215-265`.
 
 - [x] **Clean the stale follow-up ledger.** Done 2026-11-19.
   - [x] Tick spec 0005 "Row 9: orders must reject archived customers"; closed by spec 0007 AC-13.

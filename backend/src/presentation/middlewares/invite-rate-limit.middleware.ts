@@ -88,6 +88,17 @@ export const inviteWriteRateLimiter = teamLimiter('team-write', {
   keyGenerator: ownerKey,
 });
 
+/**
+ * Thirty team mutations (cancel invitation, role change, member removal) per
+ * fifteen minutes per owner. Kept separate from `inviteWriteRateLimiter` so
+ * managing members never consumes the email invitation quota.
+ */
+export const teamMutationRateLimiter = teamLimiter('team-mutation', {
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  keyGenerator: ownerKey,
+});
+
 /** Five accept attempts per quarter hour per address; token guesses are expensive. */
 export const inviteAcceptRateLimiter = teamLimiter('team-accept', {
   windowMs: 15 * 60 * 1000,

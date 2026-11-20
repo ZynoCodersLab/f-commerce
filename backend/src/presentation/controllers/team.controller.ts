@@ -15,6 +15,7 @@ import {
   invitePreviewRateLimiter,
   invitePreviewTokenRateLimiter,
   inviteWriteRateLimiter,
+  teamMutationRateLimiter,
 } from '../middlewares/invite-rate-limit.middleware.js';
 import { DrizzleTeamRepository } from '../../infrastructure/database/drizzle/repositories/team.repository.js';
 import { DrizzleAuthRepository } from '../../infrastructure/database/drizzle/repositories/auth.repository.js';
@@ -215,6 +216,7 @@ teamRouter.post(
 teamRouter.delete(
   '/invitations/:id',
   requireBusinessRole(OWNER_ONLY),
+  teamMutationRateLimiter,
   async (req: Request, res: Response) => {
     try {
       const { businessId, userId } = actorFromContext();
@@ -229,6 +231,7 @@ teamRouter.delete(
 teamRouter.patch(
   '/members/:id',
   requireBusinessRole(OWNER_ONLY),
+  teamMutationRateLimiter,
   async (req: Request, res: Response) => {
     try {
       const parsed = MemberRoleUpdateSchema.safeParse(req.body ?? {});
@@ -252,6 +255,7 @@ teamRouter.patch(
 teamRouter.delete(
   '/members/:id',
   requireBusinessRole(OWNER_ONLY),
+  teamMutationRateLimiter,
   async (req: Request, res: Response) => {
     try {
       const { businessId, userId } = actorFromContext();
