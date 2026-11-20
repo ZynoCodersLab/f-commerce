@@ -9,7 +9,8 @@ The contracts package contains shared TypeScript DTOs, Zod schemas, enums, and A
 | File                  | Owns                                                                                |
 | --------------------- | ----------------------------------------------------------------------------------- |
 | `src/index.ts`        | Shared response schemas and inferred types                                          |
-| `src/business.ts`     | Business profile schemas, `TimezoneSchema`, and `resolveTimeZone`                   |
+| `src/business.ts`     | Business profile schemas, audit constants, `TimezoneSchema`, and `resolveTimeZone`  |
+| `src/email.ts`        | Shared `EmailSchema`: trim, lowercase, and 254 character bound                      |
 | `src/team.ts`         | Team member, invitation, accept, and role schemas shared by the API and UI          |
 | `src/index.test.ts`   | Contract validation tests                                                           |
 | `tsconfig.build.json` | Production build program; excludes `src/**/*.test.ts` so `dist/` ships no test code |
@@ -33,6 +34,7 @@ npm run test --workspace @f-commerce/contracts
 - Keep this package independent from backend internals and frontend components.
 - Use native ESM, strict TypeScript, and named exports.
 - Validate timezones through `TimezoneSchema`, never a bare string. It trims, bounds to 64 characters, rejects fixed offsets and abbreviations, and stores the runtime's canonical ID from `resolveTimeZone`. A response schema that must read a legacy or corrupt value checks presence only, so a bad stored value cannot fail a read.
+- Normalize every email field through `EmailSchema` from `src/email.ts` (aliased as `TeamEmailSchema`). It trims, lowercases, and bounds the address to 254 characters, so casing or surrounding spaces never split an account or an invitation.
 - Consumers resolve types from `src/index.ts` but runtime values from `dist/index.js` (the `package.json` exports map), so this workspace must be built before an application build or start. The applications' `prebuild` and `pretest` scripts do that automatically, and the frontend also keeps a `predev`. The backend dev server instead runs with `--conditions=tsx-dev`, and the exports map serves `src/index.ts` under that condition, so backend dev runs without a contracts build.
 
 _Drafted by /audit from the repo, worth a quick human pass. Edit freely: once a line stops matching this draft, later runs treat it as curated and will flag rather than overwrite._
