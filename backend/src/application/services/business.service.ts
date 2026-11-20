@@ -32,8 +32,12 @@ export class BusinessService {
     return this.businessRepository.findById(businessId);
   }
 
-  async updateBusiness(businessId: string, data: BusinessUpdateData): Promise<Business | null> {
-    return this.businessRepository.updateProfile(businessId, data);
+  async updateBusiness(
+    businessId: string,
+    data: BusinessUpdateData,
+    actorUserId: string,
+  ): Promise<Business | null> {
+    return this.businessRepository.updateProfile(businessId, data, { userId: actorUserId });
   }
 
   /**
@@ -55,23 +59,24 @@ export class BusinessService {
       address: AddressData;
       logoUrl?: string;
     },
+    actorUserId: string,
   ): Promise<Business | null> {
     if (!data.name || !data.currency || !data.timezone || !data.address) {
       throw new BadRequestError(
         'Name, currency, timezone, and address are required to complete onboarding',
       );
     }
-    const updated = await this.businessRepository.updateProfile(businessId, {
-      name: data.name,
-      currency: data.currency,
-      timezone: data.timezone,
-      address: data.address,
-      logoUrl: data.logoUrl,
-      onboardingComplete: true,
-    });
-    // Clear the onboarding draft after promoting fields to the live profile
-    await this.businessRepository.clearDraft(businessId);
-    return updated;
+    return this.businessRepository.completeOnboarding(
+      businessId,
+      {
+        name: data.name,
+        currency: data.currency,
+        timezone: data.timezone,
+        address: data.address,
+        logoUrl: data.logoUrl,
+      },
+      { userId: actorUserId },
+    );
   }
 
   async uploadLogo(businessId: string, imageBuffer: Buffer): Promise<{ logoUrl: string }> {

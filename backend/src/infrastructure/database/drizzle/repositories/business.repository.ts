@@ -1,8 +1,14 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { getDb } from '../client.js';
-import { businesses } from '../schema.js';
+import { auditLogs, businesses } from '../schema.js';
 import { isUuid } from '../../../../domain/uuid.js';
+import {
+  BusinessAuditActor,
+  buildBusinessProfileAuditEntries,
+  buildOnboardingCompletedAuditEntry,
+} from '../../../../domain/business-audit.js';
 import { Business } from '../../../../domain/entities/business.entity.js';
+import { ConflictError } from '../../../../domain/errors.js';
 import { IBusinessRepository } from '../../../../domain/repositories/business.repository.js';
 
 function toBusiness(row: typeof businesses.$inferSelect): Business {
@@ -37,8 +43,9 @@ export class DrizzleBusinessRepository implements IBusinessRepository {
       address?: Business['address'];
       logoUrl?: string;
       onboardingComplete?: boolean;
-      onboardingDraft?: Business['onboardingDraft'];
+      onboardingDraft?: Business['onboardingDraft'] | null;
     },
+    audit?: BusinessAuditActor,
   ): Promise<Business | null> {
     if (!isUuid(id)) return null;
 
@@ -51,12 +58,97 @@ export class DrizzleBusinessRepository implements IBusinessRepository {
     if (data.onboardingComplete !== undefined) changes.onboardingComplete = data.onboardingComplete;
     if (data.onboardingDraft !== undefined) changes.onboardingDraft = data.onboardingDraft;
 
-    const result = await getDb()
-      .update(businesses)
-      .set(changes)
-      .where(eq(businesses.id, id))
-      .returning();
-    return result.length > 0 ? toBusiness(result[0]) : null;
+    if (!audit) {
+      const result = await getDb()
+        .update(businesses)
+        .set(changes)
+        .where(eq(businesses.id, id))
+        .returning();
+      return result.length > 0 ? toBusiness(result[0]) : null;
+    }
+
+    // Lock the business row before updating so concurrent profile edits never
+    // compute a stale previousValue, and commit the profile and audit rows
+    // together in one transaction.
+    return await getDb().transaction(async (tx) => {
+      const existingRows = await tx
+        .select()
+        .from(businesses)
+        .where(eq(businesses.id, id))
+        .for('update');
+      if (existingRows.length === 0) return null;
+
+      const previous = toBusiness(existingRows[0]);
+      const updatedRows = await tx
+        .update(businesses)
+        .set(changes)
+        .where(eq(businesses.id, id))
+        .returning();
+      if (updatedRows.length === 0) return null;
+
+      const updated = toBusiness(updatedRows[0]);
+      const entries = buildBusinessProfileAuditEntries(previous, updated, audit);
+      if (entries.length > 0) {
+        await tx.insert(auditLogs).values(entries);
+      }
+
+      return updated;
+    });
+  }
+
+  async completeOnboarding(
+    id: string,
+    data: {
+      name: string;
+      currency: string;
+      timezone: string;
+      address: NonNullable<Business['address']>;
+      logoUrl?: string;
+    },
+    audit: BusinessAuditActor,
+  ): Promise<Business | null> {
+    if (!isUuid(id)) return null;
+
+    return await getDb().transaction(async (tx) => {
+      const existingRows = await tx
+        .select()
+        .from(businesses)
+        .where(eq(businesses.id, id))
+        .for('update');
+      if (existingRows.length === 0) return null;
+
+      const previous = toBusiness(existingRows[0]);
+      if (previous.onboardingComplete) {
+        throw new ConflictError('Onboarding is already complete');
+      }
+
+      const changes: Partial<typeof businesses.$inferInsert> = {
+        name: data.name,
+        currency: data.currency,
+        timezone: data.timezone,
+        address: data.address,
+        onboardingComplete: true,
+        onboardingDraft: null,
+        updatedAt: new Date(),
+      };
+      if (data.logoUrl !== undefined) {
+        changes.logoUrl = data.logoUrl || null;
+      }
+
+      const updatedRows = await tx
+        .update(businesses)
+        .set(changes)
+        .where(eq(businesses.id, id))
+        .returning();
+      if (updatedRows.length === 0) return null;
+
+      const updated = toBusiness(updatedRows[0]);
+      await tx
+        .insert(auditLogs)
+        .values(buildOnboardingCompletedAuditEntry(previous, updated, audit));
+
+      return updated;
+    });
   }
 
   /**

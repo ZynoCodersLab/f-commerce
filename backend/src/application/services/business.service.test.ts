@@ -8,6 +8,7 @@ import { BadRequestError } from '../../domain/errors.js';
 const mockBusinessRepository = {
   findById: vi.fn(),
   updateProfile: vi.fn(),
+  completeOnboarding: vi.fn(),
   saveDraft: vi.fn(),
   clearDraft: vi.fn(),
 } as unknown as Mocked<IBusinessRepository>;
@@ -16,6 +17,7 @@ const mockCloudinaryService = {
   uploadImage: vi.fn(),
 } as unknown as Mocked<CloudinaryService>;
 
+const ACTOR_USER_ID = 'user-1';
 const MOCK_DATE = new Date('2026-01-01');
 
 const VALID_ADDRESS: AddressData = {
@@ -72,21 +74,27 @@ describe('BusinessService', () => {
 
   describe('updateBusiness', () => {
     // covers AC-5: owner edits business profile from Settings
-    it('passes the update data through to the repository', async () => {
+    it('passes the update data and audit actor through to the repository', async () => {
       const updateData = { name: 'Updated Name', currency: 'USD' as Currency };
       const mockUpdated = makeBusiness({ name: 'Updated Name', currency: 'USD' as Currency });
       mockBusinessRepository.updateProfile.mockResolvedValueOnce(mockUpdated);
 
-      const result = await businessService.updateBusiness('biz1', updateData);
+      const result = await businessService.updateBusiness('biz1', updateData, ACTOR_USER_ID);
 
-      expect(mockBusinessRepository.updateProfile).toHaveBeenCalledWith('biz1', updateData);
+      expect(mockBusinessRepository.updateProfile).toHaveBeenCalledWith('biz1', updateData, {
+        userId: ACTOR_USER_ID,
+      });
       expect(result).toEqual(mockUpdated);
     });
 
     it('returns null when the business is not found', async () => {
       mockBusinessRepository.updateProfile.mockResolvedValueOnce(null);
 
-      const result = await businessService.updateBusiness('nonexistent', { name: 'X' });
+      const result = await businessService.updateBusiness(
+        'nonexistent',
+        { name: 'X' },
+        ACTOR_USER_ID,
+      );
 
       expect(result).toBeNull();
     });
@@ -95,11 +103,13 @@ describe('BusinessService', () => {
       const mockUpdated = makeBusiness();
       mockBusinessRepository.updateProfile.mockResolvedValueOnce(mockUpdated);
 
-      await businessService.updateBusiness('biz1', { currency: 'EUR' as Currency });
+      await businessService.updateBusiness('biz1', { currency: 'EUR' as Currency }, ACTOR_USER_ID);
 
-      expect(mockBusinessRepository.updateProfile).toHaveBeenCalledWith('biz1', {
-        currency: 'EUR',
-      });
+      expect(mockBusinessRepository.updateProfile).toHaveBeenCalledWith(
+        'biz1',
+        { currency: 'EUR' },
+        { userId: ACTOR_USER_ID },
+      );
     });
   });
 
@@ -141,7 +151,7 @@ describe('BusinessService', () => {
   describe('completeOnboarding', () => {
     // covers AC-4: completing the wizard sets onboardingComplete=true and redirects to dashboard
     // covers key invariant: onboardingComplete is only set when name, currency, and address are all populated
-    it('sets onboardingComplete true, saves all fields, and clears the draft', async () => {
+    it('delegates onboarding completion and audit actor to the repository', async () => {
       const completeData = {
         name: 'My Business',
         currency: 'BDT' as Currency,
@@ -153,74 +163,90 @@ describe('BusinessService', () => {
         name: 'My Business',
         onboardingComplete: true,
       });
-      mockBusinessRepository.updateProfile.mockResolvedValueOnce(mockUpdated);
-      mockBusinessRepository.clearDraft.mockResolvedValueOnce(undefined);
+      mockBusinessRepository.completeOnboarding.mockResolvedValueOnce(mockUpdated);
 
-      const result = await businessService.completeOnboarding('biz1', completeData);
+      const result = await businessService.completeOnboarding('biz1', completeData, ACTOR_USER_ID);
 
-      expect(mockBusinessRepository.updateProfile).toHaveBeenCalledWith('biz1', {
-        name: 'My Business',
-        currency: 'BDT',
-        timezone: 'Asia/Dhaka',
-        address: VALID_ADDRESS,
-        logoUrl: 'https://res.cloudinary.com/demo/image.png',
-        onboardingComplete: true,
-      });
-      expect(mockBusinessRepository.clearDraft).toHaveBeenCalledWith('biz1');
+      expect(mockBusinessRepository.completeOnboarding).toHaveBeenCalledWith(
+        'biz1',
+        {
+          name: 'My Business',
+          currency: 'BDT',
+          timezone: 'Asia/Dhaka',
+          address: VALID_ADDRESS,
+          logoUrl: 'https://res.cloudinary.com/demo/image.png',
+        },
+        { userId: ACTOR_USER_ID },
+      );
       expect(result).toEqual(mockUpdated);
     });
 
     it('throws BadRequestError when name is missing', async () => {
       await expect(
-        businessService.completeOnboarding('biz1', {
-          name: '',
-          currency: 'BDT' as Currency,
-          timezone: 'Asia/Dhaka',
-          address: VALID_ADDRESS,
-        }),
+        businessService.completeOnboarding(
+          'biz1',
+          {
+            name: '',
+            currency: 'BDT' as Currency,
+            timezone: 'Asia/Dhaka',
+            address: VALID_ADDRESS,
+          },
+          ACTOR_USER_ID,
+        ),
       ).rejects.toThrow(BadRequestError);
 
-      expect(mockBusinessRepository.updateProfile).not.toHaveBeenCalled();
-      expect(mockBusinessRepository.clearDraft).not.toHaveBeenCalled();
+      expect(mockBusinessRepository.completeOnboarding).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestError when currency is missing', async () => {
       await expect(
-        businessService.completeOnboarding('biz1', {
-          name: 'Biz',
-          currency: '' as Currency,
-          timezone: 'Asia/Dhaka',
-          address: VALID_ADDRESS,
-        }),
+        businessService.completeOnboarding(
+          'biz1',
+          {
+            name: 'Biz',
+            currency: '' as Currency,
+            timezone: 'Asia/Dhaka',
+            address: VALID_ADDRESS,
+          },
+          ACTOR_USER_ID,
+        ),
       ).rejects.toThrow(BadRequestError);
 
-      expect(mockBusinessRepository.updateProfile).not.toHaveBeenCalled();
+      expect(mockBusinessRepository.completeOnboarding).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestError when timezone is missing', async () => {
       await expect(
-        businessService.completeOnboarding('biz1', {
-          name: 'Biz',
-          currency: 'BDT' as Currency,
-          timezone: '',
-          address: VALID_ADDRESS,
-        }),
+        businessService.completeOnboarding(
+          'biz1',
+          {
+            name: 'Biz',
+            currency: 'BDT' as Currency,
+            timezone: '',
+            address: VALID_ADDRESS,
+          },
+          ACTOR_USER_ID,
+        ),
       ).rejects.toThrow(BadRequestError);
 
-      expect(mockBusinessRepository.updateProfile).not.toHaveBeenCalled();
+      expect(mockBusinessRepository.completeOnboarding).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestError when address is missing', async () => {
       await expect(
-        businessService.completeOnboarding('biz1', {
-          name: 'Biz',
-          currency: 'BDT' as Currency,
-          timezone: 'Asia/Dhaka',
-          address: undefined as unknown as AddressData,
-        }),
+        businessService.completeOnboarding(
+          'biz1',
+          {
+            name: 'Biz',
+            currency: 'BDT' as Currency,
+            timezone: 'Asia/Dhaka',
+            address: undefined as unknown as AddressData,
+          },
+          ACTOR_USER_ID,
+        ),
       ).rejects.toThrow(BadRequestError);
 
-      expect(mockBusinessRepository.updateProfile).not.toHaveBeenCalled();
+      expect(mockBusinessRepository.completeOnboarding).not.toHaveBeenCalled();
     });
 
     it('completes onboarding without a logo URL', async () => {
@@ -234,20 +260,21 @@ describe('BusinessService', () => {
         name: 'My Business',
         onboardingComplete: true,
       });
-      mockBusinessRepository.updateProfile.mockResolvedValueOnce(mockUpdated);
-      mockBusinessRepository.clearDraft.mockResolvedValueOnce(undefined);
+      mockBusinessRepository.completeOnboarding.mockResolvedValueOnce(mockUpdated);
 
-      const result = await businessService.completeOnboarding('biz1', completeData);
+      const result = await businessService.completeOnboarding('biz1', completeData, ACTOR_USER_ID);
 
-      expect(mockBusinessRepository.updateProfile).toHaveBeenCalledWith('biz1', {
-        name: 'My Business',
-        currency: 'USD',
-        timezone: 'Europe/London',
-        address: VALID_ADDRESS,
-        logoUrl: undefined,
-        onboardingComplete: true,
-      });
-      expect(mockBusinessRepository.clearDraft).toHaveBeenCalledWith('biz1');
+      expect(mockBusinessRepository.completeOnboarding).toHaveBeenCalledWith(
+        'biz1',
+        {
+          name: 'My Business',
+          currency: 'USD',
+          timezone: 'Europe/London',
+          address: VALID_ADDRESS,
+          logoUrl: undefined,
+        },
+        { userId: ACTOR_USER_ID },
+      );
       expect(result).toEqual(mockUpdated);
     });
   });
@@ -285,9 +312,13 @@ describe('BusinessService', () => {
 
       mockBusinessRepository.updateProfile.mockResolvedValueOnce(updatedBusiness);
 
-      const result = await businessService.updateBusiness('biz1', { logoUrl });
+      const result = await businessService.updateBusiness('biz1', { logoUrl }, ACTOR_USER_ID);
 
-      expect(mockBusinessRepository.updateProfile).toHaveBeenCalledWith('biz1', { logoUrl });
+      expect(mockBusinessRepository.updateProfile).toHaveBeenCalledWith(
+        'biz1',
+        { logoUrl },
+        { userId: ACTOR_USER_ID },
+      );
       expect(result?.logoUrl).toBe(logoUrl);
     });
   });

@@ -130,7 +130,7 @@ Successful bodies use the endpoint-specific payloads. Errors use `{ "error": "<C
 
 - Roles `OWNER` and `STAFF` can create, edit, search, view profiles and order history with totals, archive, and restore. Enforced by `requireBusinessRole(['OWNER', 'STAFF'])` on every customer route.
 - Inferred: `STAFF` can see order history and totals. The seller confirmed `STAFF` sees totals, and spec 0003 gives `STAFF` read access to business data.
-- Inferred: `STAFF` can see customer notes. Confirm under Follow-up.
+- Confirmed (2026-11-21): `STAFF` can see and edit customer notes.
 - People outside the business get 403 from the membership check. Customer ids from another business return 404.
 - Customer personal data (name, phone, email, address, notes) is not written to application logs. Audit entries store ids and the action, not personal fields.
 - Audit entries are write once.
@@ -199,4 +199,4 @@ Successful bodies use the endpoint-specific payloads. Errors use `{ "error": "<C
 - [ ] Revisit phone reuse only if product policy changes. Releasing archived numbers requires a partial unique index on live records and makes the `PHONE_IN_USE` restore guard reachable.
 - [x] Row 9 (orders) must reject new orders for archived customers. Closed by spec 0007 AC-13, which returns 409 `CUSTOMER_ARCHIVED` on create and on edit.
 - [ ] Row 16 (search and filters) adds contains match search with a text index.
-- [ ] Confirm that `STAFF` can see customer notes (default in this spec: yes).
+- [x] Confirm that `STAFF` can see customer notes (default in this spec: yes). Confirmed 2026-11-21: `STAFF` can see and edit customer notes.

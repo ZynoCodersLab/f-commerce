@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { IsoDateTimeSchema } from './datetime.js';
+import { EmailSchema } from './email.js';
 
 /** Roles a membership can hold. */
 export const TeamRoleEnum = z.enum(['OWNER', 'STAFF']);
@@ -57,15 +58,10 @@ export const TeamErrorCode = {
 export type TeamErrorCodeType = (typeof TeamErrorCode)[keyof typeof TeamErrorCode];
 
 /**
- * An email address as the team feature stores it: trimmed and lowercased, so
- * the same person cannot hold two accounts or two invitations that differ only
- * in case.
+ * An email address as the team feature stores it. Aliases the shared
+ * `EmailSchema` so auth and invitations normalize addresses identically.
  */
-export const TeamEmailSchema = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .pipe(z.string().email('Enter a valid email address').max(254));
+export const TeamEmailSchema = EmailSchema;
 
 export const InviteCreateSchema = z.object({
   email: TeamEmailSchema,

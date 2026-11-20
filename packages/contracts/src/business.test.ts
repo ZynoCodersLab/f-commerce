@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { BusinessResponseSchema, OnboardingDraftSchema } from './index.js';
+import {
+  BusinessAuditAction,
+  BusinessAuditEntity,
+  BusinessResponseSchema,
+  OnboardingDraftSchema,
+} from './index.js';
 
 function baseResponse(overrides: Record<string, unknown> = {}) {
   return {
@@ -93,5 +98,17 @@ describe('business response contract', () => {
         logoUrl: 'https://example.com/logo.png',
       }),
     ).toMatchObject({ name: 'Draft Co', currency: 'EUR', timezone: 'Europe/Berlin' });
+  });
+
+  it('exports stable business audit action and entity constants', () => {
+    expect(BusinessAuditAction).toEqual({
+      ONBOARDING_COMPLETED: 'BUSINESS_ONBOARDING_COMPLETED',
+      PROFILE_UPDATED: 'BUSINESS_PROFILE_UPDATED',
+      LOGO_UPDATED: 'BUSINESS_LOGO_UPDATED',
+      TIMEZONE_CHANGED: 'BUSINESS_TIMEZONE_CHANGED',
+    });
+    expect(BusinessAuditEntity).toEqual({
+      BUSINESS: 'Business',
+    });
   });
 });

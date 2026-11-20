@@ -163,7 +163,7 @@ Tracer Bullet: stand up the column, the profile field, the provider, and one scr
 
 ## Follow-up
 
-- [ ] Add a business profile audit row if timezone changes later need a trail.
+- [x] Add a business profile audit row if timezone changes later need a trail. Done 2026-11-20 (`BUSINESS_TIMEZONE_CHANGED` written atomically in `DrizzleBusinessRepository`).
 - [ ] Add an overdue filter or sort that uses the business day once the orders list needs it.
 - [ ] Use `todayInTimeZone` in reports and the dashboard when feature 14 lands.
 - [ ] Consider a per order timezone snapshot only if a future requirement needs historical day boundaries.

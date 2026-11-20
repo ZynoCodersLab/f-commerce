@@ -54,6 +54,10 @@ export async function processInviteEmailJob(
         .markEmailFailed(data.invitationId, data.tokenHash, 'EMAIL_SEND_FAILED')
         .catch(() => undefined);
     }
+    // Re-throw on every attempt: earlier attempts need the rejection so BullMQ
+    // schedules the backoff retry, and on the final attempt BullMQ checks
+    // `attemptsMade + 1 < attempts` (no extra retry) then emits `failed` so
+    // worker.ts logs the crash instead of swallowing it as a completed job.
     throw error;
   }
 }

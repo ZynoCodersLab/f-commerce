@@ -267,7 +267,9 @@ export default function TeamPage() {
       setNotice(
         caught instanceof TeamApiError && caught.code === 'LAST_OWNER'
           ? 'A team needs at least one owner, so the last owner keeps that role.'
-          : 'Could not change that role. Try again.',
+          : caught instanceof TeamApiError && caught.code === 'RATE_LIMITED'
+            ? 'Too many team changes. Try again in a few minutes.'
+            : 'Could not change that role. Try again.',
       );
     } finally {
       setBusyId(null);
@@ -299,7 +301,11 @@ export default function TeamPage() {
       }
       // Keep the dialog open on a failure so the message is visible and the
       // action can be retried; closing it made a failed removal look done.
-      setConfirmError('That did not work. Try again.');
+      setConfirmError(
+        caught instanceof TeamApiError && caught.code === 'RATE_LIMITED'
+          ? 'Too many team changes. Try again in a few minutes.'
+          : 'That did not work. Try again.',
+      );
     } finally {
       setConfirmBusy(false);
     }
