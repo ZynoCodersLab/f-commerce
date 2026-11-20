@@ -72,10 +72,12 @@ Last reviewed: 2026-11-19.
       Source: `docs/specs/0004-business-profile-onboarding/index.md:191`,
       `docs/specs/0008-business-timezone/index.md:166`.
 
-- [ ] **Use a shared Redis store for the general rate limiters.** The global, login, registration,
-      refresh, and upload limiters still use `express-rate-limit`'s in-memory store. Only the invite
-      limiters are Redis-backed. Required before running more than one API instance. Effort: S-M.
-      Source: `docs/specs/0001-stack-and-architecture.md:143`.
+- [x] **Use a shared Redis store for the general rate limiters.** Done 2026-11-21. Extracted the
+      shared `RedisRateLimitStore` and single multiplexed Redis client into
+      `backend/src/presentation/middlewares/redis-rate-limit-store.ts` and wired all six general
+      limiters (`global`, `login-ip`, `login-account`, `register`, `refresh`, `upload`) to it with
+      in process fail open fallback and `/health` skipping before touching Redis. Source:
+      `docs/specs/0001-stack-and-architecture.md:143`.
 
 - [ ] **Add CI path filters.** Every pull request currently runs the full backend, Redis, worker,
       Playwright, and build pipeline. Effort: S-M. Source:

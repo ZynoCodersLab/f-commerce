@@ -1,8 +1,11 @@
 import type { Server } from 'node:http';
 import express from 'express';
+import { Redis } from 'ioredis';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { config } from '../../infrastructure/config.js';
+import { closeRateLimitStore, getRateLimitRedisClient } from './redis-rate-limit-store.js';
 import {
   globalRateLimiter,
   loginAccountRateLimiter,
@@ -11,7 +14,30 @@ import {
   uploadRateLimiter,
 } from './rate-limit.middleware.js';
 
+const GENERAL_PREFIXES = [
+  'ratelimit:global:*',
+  'ratelimit:login-ip:*',
+  'ratelimit:login-account:*',
+  'ratelimit:register:*',
+  'ratelimit:refresh:*',
+  'ratelimit:upload:*',
+];
+
 let server: Server;
+let redis: Redis | null = null;
+let redisUp = false;
+
+async function clearGeneralKeys(): Promise<void> {
+  if (!redis || !redisUp) return;
+  for (const pattern of GENERAL_PREFIXES) {
+    let cursor = '0';
+    do {
+      const [next, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = next;
+      if (keys.length > 0) await redis.del(...keys);
+    } while (cursor !== '0');
+  }
+}
 
 /** TEST-NET-3 addresses keep each test's limiter keys isolated. */
 let nextIp = 1;
@@ -21,7 +47,23 @@ function uniqueIp(): string {
   return ip;
 }
 
-beforeAll(() => {
+beforeAll(async () => {
+  redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: 1, connectTimeout: 1_000 });
+  redis.on('error', () => {
+    // Offline runs exercise the in process fallback; silence connection errors.
+  });
+  redisUp = await redis
+    .ping()
+    .then(() => true)
+    .catch(() => false);
+  if (redisUp) {
+    const sharedClient = getRateLimitRedisClient();
+    if (sharedClient.status !== 'ready') {
+      await new Promise<void>((resolve) => sharedClient.once('ready', () => resolve()));
+    }
+    await clearGeneralKeys();
+  }
+
   const app = express();
   app.set('trust proxy', 1);
   app.use(express.json());
@@ -62,7 +104,14 @@ beforeAll(() => {
   server = app.listen(0);
 });
 
+beforeEach(async () => {
+  await clearGeneralKeys();
+});
+
 afterAll(async () => {
+  await clearGeneralKeys();
+  redis?.disconnect();
+  await closeRateLimitStore();
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });
