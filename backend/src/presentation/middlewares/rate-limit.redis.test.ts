@@ -136,11 +136,12 @@ describe('general rate limiters with shared Redis store', () => {
       .set('X-Forwarded-For', ip)
       .send({ email, password: 'correct' });
     expect(okLogin.status).toBe(200);
-    await new Promise((resolve) => setTimeout(resolve, 25));
 
     // Successful sign-ins decrement the shared Redis counter back to 0.
-    expect(await redis.get(hashedKey('login-ip', ip))).toBe('0');
-    expect(await redis.get(hashedKey('login-account', `login:${email}`))).toBe('0');
+    await expect.poll(() => redis.get(hashedKey('login-ip', ip)), { timeout: 1000 }).toBe('0');
+    await expect
+      .poll(() => redis.get(hashedKey('login-account', `login:${email}`)), { timeout: 1000 })
+      .toBe('0');
 
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const failed = await request(first)

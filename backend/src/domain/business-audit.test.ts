@@ -184,5 +184,46 @@ describe('business profile audit builders', () => {
         logoUrl: 'https://res.cloudinary.com/demo/new.png',
       });
     });
+
+    it('records address additions and field updates under BUSINESS_PROFILE_UPDATED', () => {
+      const withoutAddress = makeBusiness({ address: undefined });
+      const addedAddress = makeBusiness({
+        address: {
+          street: '42 Lake Rd',
+          city: 'Dhaka',
+          region: 'Dhaka Division',
+          postalCode: '1212',
+          country: 'Bangladesh',
+        },
+      });
+      const updatedAddress = makeBusiness({
+        address: {
+          street: '42 Lake Rd',
+          city: 'Dhaka',
+          region: '',
+          postalCode: '1213',
+          country: 'Bangladesh',
+        },
+      });
+
+      const addEntries = buildBusinessProfileAuditEntries(withoutAddress, addedAddress, ACTOR);
+      expect(addEntries).toHaveLength(1);
+      expect(addEntries[0]?.action).toBe(BusinessAuditAction.PROFILE_UPDATED);
+      expect(JSON.parse(addEntries[0]!.previousValue)).toEqual({ address: null });
+      expect(JSON.parse(addEntries[0]!.newValue)).toEqual({ address: addedAddress.address });
+
+      const editEntries = buildBusinessProfileAuditEntries(addedAddress, updatedAddress, ACTOR);
+      expect(editEntries).toHaveLength(1);
+      expect(editEntries[0]?.action).toBe(BusinessAuditAction.PROFILE_UPDATED);
+      expect(JSON.parse(editEntries[0]!.previousValue)).toEqual({ address: addedAddress.address });
+      expect(JSON.parse(editEntries[0]!.newValue)).toEqual({
+        address: {
+          street: '42 Lake Rd',
+          city: 'Dhaka',
+          postalCode: '1213',
+          country: 'Bangladesh',
+        },
+      });
+    });
   });
 });

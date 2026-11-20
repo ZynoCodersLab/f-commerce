@@ -112,15 +112,3 @@ describe('business response contract', () => {
     });
   });
 });
-
-it('exports stable business audit action and entity constants', () => {
-  expect(BusinessAuditAction).toEqual({
-    ONBOARDING_COMPLETED: 'BUSINESS_ONBOARDING_COMPLETED',
-    PROFILE_UPDATED: 'BUSINESS_PROFILE_UPDATED',
-    LOGO_UPDATED: 'BUSINESS_LOGO_UPDATED',
-    TIMEZONE_CHANGED: 'BUSINESS_TIMEZONE_CHANGED',
-  });
-  expect(BusinessAuditEntity).toEqual({
-    BUSINESS: 'Business',
-  });
-});

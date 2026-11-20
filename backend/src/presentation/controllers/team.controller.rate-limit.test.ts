@@ -161,6 +161,12 @@ describe('team mutation rate limiting', () => {
       .set('x-user-id', owner);
     expect(blockedCancel.status).toBe(429);
     expect(blockedCancel.body.error).toBe('RATE_LIMITED');
+    expect(blockedCancel.headers['referrer-policy']).toBe('no-referrer');
+    expect(blockedCancel.headers['cache-control']).toBe('no-store');
+    expect(blockedCancel.headers['x-robots-tag']).toBe('noindex');
+    expect(blockedCancel.headers['ratelimit']).toBeDefined();
+    expect(blockedCancel.headers['retry-after']).toBeDefined();
+    expect(blockedCancel.headers['x-ratelimit-limit']).toBeUndefined();
 
     const blockedRole = await request(app)
       .patch('/api/team/members/member-over')

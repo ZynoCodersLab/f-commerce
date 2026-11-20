@@ -4,6 +4,7 @@ import { BusinessAuditAction, BusinessAuditEntity } from '@f-commerce/contracts'
 import { DrizzleBusinessRepository } from './business.repository.js';
 import { getDb } from '../client.js';
 import { auditLogs, businesses } from '../schema.js';
+import { ConflictError } from '../../../../domain/errors.js';
 import { startPg, stopPg, resetDatabase } from '../../../../test-support/pg-test-database.js';
 
 const BIZ = '00000000-0000-0000-0000-000000000011';
@@ -299,6 +300,55 @@ describe('DrizzleBusinessRepository', () => {
         logoUrl: 'https://res.cloudinary.com/demo/launched.png',
         onboardingComplete: true,
       });
+    });
+
+    it('rejects a second onboarding completion without changing the first profile', async () => {
+      await getDb()
+        .update(businesses)
+        .set({
+          onboardingComplete: false,
+          onboardingDraft: { name: 'Draft Co', currency: 'USD' },
+        })
+        .where(eq(businesses.id, BIZ));
+
+      await repository.completeOnboarding(
+        BIZ,
+        {
+          name: 'Launched Co',
+          currency: 'USD',
+          timezone: 'America/New_York',
+          address: ADDRESS,
+          logoUrl: 'https://res.cloudinary.com/demo/launched.png',
+        },
+        { userId: OWNER_USER_ID },
+      );
+
+      await expect(
+        repository.completeOnboarding(
+          BIZ,
+          {
+            name: 'Overwritten Co',
+            currency: 'EUR',
+            timezone: 'Europe/Berlin',
+            address: { ...ADDRESS, city: 'Berlin', country: 'Germany' },
+            logoUrl: 'https://res.cloudinary.com/demo/overwritten.png',
+          },
+          { userId: OWNER_USER_ID },
+        ),
+      ).rejects.toBeInstanceOf(ConflictError);
+
+      expect(await repository.findById(BIZ)).toMatchObject({
+        name: 'Launched Co',
+        currency: 'USD',
+        timezone: 'America/New_York',
+        logoUrl: 'https://res.cloudinary.com/demo/launched.png',
+        address: ADDRESS,
+        onboardingComplete: true,
+      });
+
+      const rows = await listAudits(BIZ);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.action).toBe(BusinessAuditAction.ONBOARDING_COMPLETED);
     });
 
     it('writes profile, timezone, and logo audit rows for changed fields only', async () => {

@@ -446,4 +446,162 @@ describe('TeamPage', () => {
       expect(screen.queryByText('https://shop.example.com/invite/abc123')).not.toBeInTheDocument(),
     );
   });
+
+  it('shows a rate limit message when a role change is throttled', async () => {
+    setAuth({ accessToken: token({ userId: OWNER_ID }), businessId: 'biz-1' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (_input: RequestInfo, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          return jsonResponse(429, {
+            error: 'RATE_LIMITED',
+            message: 'Too many requests. Please try again later.',
+          });
+        }
+        return jsonResponse(200, teamBody);
+      }),
+    );
+
+    render(
+      <ThemeBoundary>
+        <TeamPage />
+      </ThemeBoundary>,
+    );
+
+    const user = userEvent.setup();
+    const roleSelects = await screen.findAllByLabelText('Role for Sam Staff');
+    await user.selectOptions(roleSelects[0], 'OWNER');
+
+    expect(
+      await screen.findByText('Too many team changes. Try again in a few minutes.'),
+    ).toBeVisible();
+  });
+
+  it('explains why the last owner cannot be demoted', async () => {
+    setAuth({ accessToken: token({ userId: OWNER_ID }), businessId: 'biz-1' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (_input: RequestInfo, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          return jsonResponse(409, {
+            error: 'LAST_OWNER',
+            message: 'A business must have at least one owner',
+          });
+        }
+        return jsonResponse(200, teamBody);
+      }),
+    );
+
+    render(
+      <ThemeBoundary>
+        <TeamPage />
+      </ThemeBoundary>,
+    );
+
+    const user = userEvent.setup();
+    const roleSelects = await screen.findAllByLabelText('Role for Sam Staff');
+    await user.selectOptions(roleSelects[0], 'OWNER');
+
+    expect(
+      await screen.findByText(
+        'A team needs at least one owner, so the last owner keeps that role.',
+      ),
+    ).toBeVisible();
+  });
+
+  it('keeps the confirmation dialog open with a rate limit message when cancelling an invitation is throttled', async () => {
+    setAuth({ accessToken: token({ userId: OWNER_ID }), businessId: 'biz-1' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (_input: RequestInfo, init?: RequestInit) => {
+        if (init?.method === 'DELETE') {
+          return jsonResponse(429, {
+            error: 'RATE_LIMITED',
+            message: 'Too many requests. Please try again later.',
+          });
+        }
+        return jsonResponse(200, teamBody);
+      }),
+    );
+
+    render(
+      <ThemeBoundary>
+        <TeamPage />
+      </ThemeBoundary>,
+    );
+
+    const user = userEvent.setup();
+    const cancelButtons = await screen.findAllByRole('button', { name: /^cancel$/i });
+    await user.click(cancelButtons[0]);
+    await user.click(await screen.findByRole('button', { name: /cancel invitation/i }));
+
+    expect(
+      await screen.findByText('Too many team changes. Try again in a few minutes.'),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: /cancel invitation/i })).toBeVisible();
+  });
+
+  it('keeps the confirmation dialog open with a rate limit message when removing a member is throttled', async () => {
+    setAuth({ accessToken: token({ userId: OWNER_ID }), businessId: 'biz-1' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (_input: RequestInfo, init?: RequestInit) => {
+        if (init?.method === 'DELETE') {
+          return jsonResponse(429, {
+            error: 'RATE_LIMITED',
+            message: 'Too many requests. Please try again later.',
+          });
+        }
+        return jsonResponse(200, teamBody);
+      }),
+    );
+
+    render(
+      <ThemeBoundary>
+        <TeamPage />
+      </ThemeBoundary>,
+    );
+
+    const user = userEvent.setup();
+    const removeButtons = await screen.findAllByRole('button', { name: /^remove$/i });
+    const enabledRemove = removeButtons.find((button) => !(button as HTMLButtonElement).disabled);
+    expect(enabledRemove).toBeDefined();
+    await user.click(enabledRemove!);
+    await user.click(await screen.findByRole('button', { name: /remove member/i }));
+
+    expect(
+      await screen.findByText('Too many team changes. Try again in a few minutes.'),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: /remove member/i })).toBeVisible();
+  });
+
+  it('removes a team member after confirmation and announces the outcome', async () => {
+    setAuth({ accessToken: token({ userId: OWNER_ID }), businessId: 'biz-1' });
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async (_input: RequestInfo, init?: RequestInit) => {
+        if (init?.method === 'DELETE') {
+          return jsonResponse(200, { success: true, data: {} });
+        }
+        return jsonResponse(200, teamBody);
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <ThemeBoundary>
+        <TeamPage />
+      </ThemeBoundary>,
+    );
+
+    const user = userEvent.setup();
+    const removeButtons = await screen.findAllByRole('button', { name: /^remove$/i });
+    const enabledRemove = removeButtons.find((button) => !(button as HTMLButtonElement).disabled);
+    expect(enabledRemove).toBeDefined();
+    await user.click(enabledRemove!);
+    await user.click(await screen.findByRole('button', { name: /remove member/i }));
+
+    expect(await screen.findByText('Sam Staff was removed from the team.')).toBeVisible();
+    const deleteCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'DELETE');
+    expect(String(deleteCall?.[0])).toContain('/api/team/members/member-2');
+  });
 });

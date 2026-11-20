@@ -8,6 +8,7 @@ import {
   buildOnboardingCompletedAuditEntry,
 } from '../../../../domain/business-audit.js';
 import { Business } from '../../../../domain/entities/business.entity.js';
+import { ConflictError } from '../../../../domain/errors.js';
 import { IBusinessRepository } from '../../../../domain/repositories/business.repository.js';
 
 function toBusiness(row: typeof businesses.$inferSelect): Business {
@@ -117,6 +118,10 @@ export class DrizzleBusinessRepository implements IBusinessRepository {
       if (existingRows.length === 0) return null;
 
       const previous = toBusiness(existingRows[0]);
+      if (previous.onboardingComplete) {
+        throw new ConflictError('Onboarding is already complete');
+      }
+
       const changes: Partial<typeof businesses.$inferInsert> = {
         name: data.name,
         currency: data.currency,

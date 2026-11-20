@@ -19,6 +19,9 @@ export interface IBusinessRepository {
   /**
    * Promote onboarding fields to the live profile, clear any remaining draft,
    * and record the onboarding completion audit entry in one transaction.
+   *
+   * Throws a `ConflictError` when onboarding is already complete so a retry
+   * cannot overwrite a profile saved later or add a second completion row.
    */
   completeOnboarding(
     id: string,

@@ -11,7 +11,7 @@ import {
   BusinessProfileUpdateSchema,
   DraftSaveSchema,
 } from '@f-commerce/contracts';
-import { NotFoundError } from '../../domain/errors.js';
+import { ConflictError, NotFoundError } from '../../domain/errors.js';
 import {
   getTenantId,
   requestContext,
@@ -345,6 +345,8 @@ businessRouter.put(
     } catch (error) {
       if (error instanceof NotFoundError) {
         res.status(404).json({ error: error.message });
+      } else if (error instanceof ConflictError) {
+        res.status(409).json({ error: 'ONBOARDING_COMPLETE', message: error.message });
       } else {
         sendInternalError(res, error);
       }

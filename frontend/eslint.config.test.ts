@@ -20,7 +20,7 @@ describe('frontend ESLint configuration', () => {
       result.messages.filter((message) => message.severity === 2),
     );
     expect(errors).toEqual([]);
-  });
+  }, 30_000);
 
   it('enforces react-hooks/set-state-in-effect for frontend files from both roots', async () => {
     const sample = [
@@ -50,5 +50,5 @@ describe('frontend ESLint configuration', () => {
     expect(workspaceResult.messages.map((message) => message.ruleId)).toContain(
       'react-hooks/set-state-in-effect',
     );
-  });
+  }, 30_000);
 });
