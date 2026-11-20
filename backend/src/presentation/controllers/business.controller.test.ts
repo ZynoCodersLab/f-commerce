@@ -7,6 +7,7 @@ import { CloudinaryService } from '../../infrastructure/services/cloudinary.serv
 const mockBusinessRepository = {
   findById: vi.fn(),
   updateProfile: vi.fn(),
+  completeOnboarding: vi.fn(),
   saveDraft: vi.fn(),
   clearDraft: vi.fn(),
 } as unknown as Mocked<IBusinessRepository>;
@@ -15,6 +16,7 @@ const mockCloudinaryService = {
   uploadImage: vi.fn(),
 } as unknown as Mocked<CloudinaryService>;
 
+const ACTOR_USER_ID = 'user-1';
 const MOCK_DATE = new Date('2026-01-01');
 
 const VALID_ADDRESS: AddressData = {
@@ -68,11 +70,19 @@ describe('Business Service Integration Tests', () => {
       expect(uploadResult.logoUrl).toBe(logoUrl);
 
       // Step 2: Persist the logo URL (controller would call this)
-      const updatedBusiness = await businessService.updateBusiness('biz1', { logoUrl });
+      const updatedBusiness = await businessService.updateBusiness(
+        'biz1',
+        { logoUrl },
+        ACTOR_USER_ID,
+      );
 
       // Verify the business now has the logo URL
       expect(updatedBusiness?.logoUrl).toBe(logoUrl);
-      expect(mockBusinessRepository.updateProfile).toHaveBeenCalledWith('biz1', { logoUrl });
+      expect(mockBusinessRepository.updateProfile).toHaveBeenCalledWith(
+        'biz1',
+        { logoUrl },
+        { userId: ACTOR_USER_ID },
+      );
     });
 
     it('preserves previously uploaded logo during onboarding completion', async () => {
@@ -83,26 +93,29 @@ describe('Business Service Integration Tests', () => {
       mockBusinessRepository.updateProfile.mockResolvedValueOnce(makeBusiness({ logoUrl }));
 
       // Then, complete onboarding (which includes logoUrl in the update)
-      mockBusinessRepository.updateProfile.mockResolvedValueOnce(
+      mockBusinessRepository.completeOnboarding.mockResolvedValueOnce(
         makeBusiness({
           name: 'My Business',
           onboardingComplete: true,
           logoUrl, // Should preserve this
         }),
       );
-      mockBusinessRepository.clearDraft.mockResolvedValueOnce(undefined);
 
       // Persist logo after upload
-      await businessService.updateBusiness('biz1', { logoUrl });
+      await businessService.updateBusiness('biz1', { logoUrl }, ACTOR_USER_ID);
 
       // Complete onboarding with logo
-      const result = await businessService.completeOnboarding('biz1', {
-        name: 'My Business',
-        currency: 'USD' as Currency,
-        timezone: 'Asia/Dhaka',
-        address: VALID_ADDRESS,
-        logoUrl, // Include the already-uploaded logo
-      });
+      const result = await businessService.completeOnboarding(
+        'biz1',
+        {
+          name: 'My Business',
+          currency: 'USD' as Currency,
+          timezone: 'Asia/Dhaka',
+          address: VALID_ADDRESS,
+          logoUrl, // Include the already-uploaded logo
+        },
+        ACTOR_USER_ID,
+      );
 
       expect(result?.onboardingComplete).toBe(true);
       expect(result?.logoUrl).toBe(logoUrl);
@@ -115,9 +128,13 @@ describe('Business Service Integration Tests', () => {
       const updatedBusiness = makeBusiness({ logoUrl });
       mockBusinessRepository.updateProfile.mockResolvedValueOnce(updatedBusiness);
 
-      const result = await businessService.updateBusiness('biz1', { logoUrl });
+      const result = await businessService.updateBusiness('biz1', { logoUrl }, ACTOR_USER_ID);
 
-      expect(mockBusinessRepository.updateProfile).toHaveBeenCalledWith('biz1', { logoUrl });
+      expect(mockBusinessRepository.updateProfile).toHaveBeenCalledWith(
+        'biz1',
+        { logoUrl },
+        { userId: ACTOR_USER_ID },
+      );
       expect(result?.logoUrl).toBe(logoUrl);
     });
   });

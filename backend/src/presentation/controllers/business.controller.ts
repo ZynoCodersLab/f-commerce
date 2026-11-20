@@ -12,8 +12,20 @@ import {
   DraftSaveSchema,
 } from '@f-commerce/contracts';
 import { NotFoundError } from '../../domain/errors.js';
-import { getTenantId, runWithContext } from '../../infrastructure/database/drizzle/context.js';
+import {
+  getTenantId,
+  requestContext,
+  runWithContext,
+} from '../../infrastructure/database/drizzle/context.js';
 import { sendInternalError } from './internal-error.js';
+
+function getActorUserId(req: Request): string | undefined {
+  const user = req.user as { userId?: string } | undefined;
+  if (typeof user?.userId === 'string' && user.userId.trim() !== '') {
+    return user.userId;
+  }
+  return requestContext?.getStore?.()?.userId;
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -181,7 +193,15 @@ businessRouter.put('/me', requireBusinessRole(['OWNER']), async (req: Request, r
       return;
     }
 
-    const business = await businessService.updateBusiness(businessId, parsed.data);
+    const actorUserId = getActorUserId(req);
+    if (!actorUserId) {
+      res
+        .status(401)
+        .json({ error: 'Authentication required', message: 'Authentication required' });
+      return;
+    }
+
+    const business = await businessService.updateBusiness(businessId, parsed.data, actorUserId);
     if (!business) {
       res.status(404).json({ error: 'Business not found', message: 'Business not found' });
       return;
@@ -243,9 +263,17 @@ businessRouter.post(
         return;
       }
 
+      const actorUserId = getActorUserId(req);
+      if (!actorUserId) {
+        res
+          .status(401)
+          .json({ error: 'Authentication required', message: 'Authentication required' });
+        return;
+      }
+
       const result = await businessService.uploadLogo(businessId, req.file.buffer);
       // Persist the logo URL to the business so it's available during onboarding
-      await businessService.updateBusiness(businessId, { logoUrl: result.logoUrl });
+      await businessService.updateBusiness(businessId, { logoUrl: result.logoUrl }, actorUserId);
       res.status(200).json({
         success: true,
         data: { logoUrl: result.logoUrl },
@@ -276,14 +304,26 @@ businessRouter.put(
         return;
       }
 
+      const actorUserId = getActorUserId(req);
+      if (!actorUserId) {
+        res
+          .status(401)
+          .json({ error: 'Authentication required', message: 'Authentication required' });
+        return;
+      }
+
       const { name, currency, timezone, address, logoUrl } = parsed.data;
-      const business = await businessService.completeOnboarding(businessId, {
-        name,
-        currency,
-        timezone,
-        address,
-        logoUrl,
-      });
+      const business = await businessService.completeOnboarding(
+        businessId,
+        {
+          name,
+          currency,
+          timezone,
+          address,
+          logoUrl,
+        },
+        actorUserId,
+      );
 
       if (!business) {
         res.status(404).json({ error: 'Business not found', message: 'Business not found' });

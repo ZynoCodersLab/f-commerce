@@ -30,12 +30,13 @@ Last reviewed: 2026-11-19.
   - [x] Remove the "Follow-ups moved from `nextTask.txt`" phrasing in `docs/scope/scope.md:348`;
         `nextTask.txt` no longer exists. Keep the disposable-email item itself.
 
-- [ ] **Fix the undefined ESLint rules in the frontend config.** Found 2026-11-19 while re-verifying
-      spec 0004: `npx eslint frontend` reports 3 errors, not 0. `react-hooks/set-state-in-effect`
-      is undefined in `frontend/src/app/invite/[token]/page.tsx:133` and
-      `frontend/src/app/settings/team/page.tsx:153`, and `react-hooks/exhaustive-deps` is undefined in
-      `frontend/src/app/onboarding/page.tsx:248`. Nothing resolves those configured rules, so lint
-      fails on a fresh checkout. Effort: S. Source:
+- [x] **Fix the undefined ESLint rules in the frontend config.** Done 2026-11-20. Running
+      `npx eslint frontend` from the repository root loaded the root `eslint.config.mjs` instead of
+      `frontend/eslint.config.mjs`, so `react-hooks` rules were missing for `frontend/**`. Root
+      `eslint.config.mjs` now delegates `frontend` via `basePath: 'frontend'` with `next.rootDir`
+      set, and the redundant manual `eslint-plugin-react-hooks` require in
+      `frontend/eslint.config.mjs` was removed (`eslint-config-next/core-web-vitals` already
+      registers it). Locked with `frontend/eslint.config.test.ts`. Source:
       `docs/specs/0004-business-profile-onboarding/verify.md:41`.
 
 - [ ] **Repo hygiene.**
@@ -64,9 +65,11 @@ Last reviewed: 2026-11-19.
 
 ## P1: before the next feature if there is time
 
-- [ ] **Add business profile audit rows.** Onboarding, profile updates, logo changes, and timezone
-      changes currently write no audit entry. Effort: M. Source:
-      `docs/specs/0004-business-profile-onboarding/index.md:191`,
+- [x] **Add business profile audit rows.** Done 2026-11-20. Onboarding completion, profile updates,
+      logo changes, and timezone changes now write `audit_logs` rows atomically in the same
+      PostgreSQL transaction (`BUSINESS_ONBOARDING_COMPLETED`, `BUSINESS_PROFILE_UPDATED`,
+      `BUSINESS_LOGO_UPDATED`, `BUSINESS_TIMEZONE_CHANGED`) with before and after JSON snapshots.
+      Source: `docs/specs/0004-business-profile-onboarding/index.md:191`,
       `docs/specs/0008-business-timezone/index.md:166`.
 
 - [ ] **Use a shared Redis store for the general rate limiters.** The global, login, registration,

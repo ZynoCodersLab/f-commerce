@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { asc, eq } from 'drizzle-orm';
+import { BusinessAuditAction, BusinessAuditEntity } from '@f-commerce/contracts';
 import { DrizzleBusinessRepository } from './business.repository.js';
 import { getDb } from '../client.js';
-import { businesses } from '../schema.js';
+import { auditLogs, businesses } from '../schema.js';
 import { startPg, stopPg, resetDatabase } from '../../../../test-support/pg-test-database.js';
 
 const BIZ = '00000000-0000-0000-0000-000000000011';
 const OTHER = '00000000-0000-0000-0000-000000000012';
 const MISSING = '00000000-0000-0000-0000-00000000dead';
+const OWNER_USER_ID = '00000000-0000-0000-0000-0000000000aa';
 
 const ADDRESS = {
   street: '123 Main St',
@@ -238,6 +241,145 @@ describe('DrizzleBusinessRepository', () => {
       expect(mine?.onboardingDraft).toEqual({ name: 'Draft Co', currency: 'USD' });
       expect(other?.name).toBe('Other Co');
       expect(other?.onboardingDraft).toEqual({ name: 'Other Draft' });
+    });
+  });
+
+  describe('audit rows', () => {
+    async function listAudits(businessId: string) {
+      return getDb()
+        .select()
+        .from(auditLogs)
+        .where(eq(auditLogs.businessId, businessId))
+        .orderBy(asc(auditLogs.createdAt), asc(auditLogs.action));
+    }
+
+    it('records onboarding completion and clears the draft in one transaction', async () => {
+      await getDb()
+        .update(businesses)
+        .set({
+          onboardingComplete: false,
+          onboardingDraft: { name: 'Draft Co', currency: 'USD' },
+        })
+        .where(eq(businesses.id, BIZ));
+
+      const updated = await repository.completeOnboarding(
+        BIZ,
+        {
+          name: 'Launched Co',
+          currency: 'USD',
+          timezone: 'America/New_York',
+          address: ADDRESS,
+          logoUrl: 'https://res.cloudinary.com/demo/launched.png',
+        },
+        { userId: OWNER_USER_ID },
+      );
+
+      expect(updated?.onboardingComplete).toBe(true);
+      expect(updated?.onboardingDraft).toBeUndefined();
+
+      const rows = await listAudits(BIZ);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        businessId: BIZ,
+        userId: OWNER_USER_ID,
+        action: BusinessAuditAction.ONBOARDING_COMPLETED,
+        entityType: BusinessAuditEntity.BUSINESS,
+        entityId: BIZ,
+      });
+      expect(JSON.parse(rows[0]!.previousValue ?? '{}')).toMatchObject({
+        name: 'Test Co',
+        currency: 'BDT',
+        timezone: 'Europe/London',
+        onboardingComplete: false,
+      });
+      expect(JSON.parse(rows[0]!.newValue ?? '{}')).toMatchObject({
+        name: 'Launched Co',
+        currency: 'USD',
+        timezone: 'America/New_York',
+        logoUrl: 'https://res.cloudinary.com/demo/launched.png',
+        onboardingComplete: true,
+      });
+    });
+
+    it('writes profile, timezone, and logo audit rows for changed fields only', async () => {
+      await repository.updateProfile(
+        BIZ,
+        {
+          name: 'Renamed Co',
+          currency: 'BDT',
+          timezone: 'Asia/Dhaka',
+          logoUrl: 'https://res.cloudinary.com/demo/v2.png',
+        },
+        { userId: OWNER_USER_ID },
+      );
+
+      const rows = await listAudits(BIZ);
+      expect(rows.map((row) => row.action)).toEqual([
+        BusinessAuditAction.LOGO_UPDATED,
+        BusinessAuditAction.PROFILE_UPDATED,
+        BusinessAuditAction.TIMEZONE_CHANGED,
+      ]);
+
+      const byAction = Object.fromEntries(rows.map((row) => [row.action, row]));
+      expect(
+        JSON.parse(byAction[BusinessAuditAction.PROFILE_UPDATED]!.previousValue ?? '{}'),
+      ).toEqual({ name: 'Test Co' });
+      expect(JSON.parse(byAction[BusinessAuditAction.PROFILE_UPDATED]!.newValue ?? '{}')).toEqual({
+        name: 'Renamed Co',
+      });
+      expect(
+        JSON.parse(byAction[BusinessAuditAction.TIMEZONE_CHANGED]!.previousValue ?? '{}'),
+      ).toEqual({ timezone: 'Europe/London' });
+      expect(JSON.parse(byAction[BusinessAuditAction.TIMEZONE_CHANGED]!.newValue ?? '{}')).toEqual({
+        timezone: 'Asia/Dhaka',
+      });
+      expect(JSON.parse(byAction[BusinessAuditAction.LOGO_UPDATED]!.previousValue ?? '{}')).toEqual(
+        { logoUrl: 'https://res.cloudinary.com/demo/img.png' },
+      );
+      expect(JSON.parse(byAction[BusinessAuditAction.LOGO_UPDATED]!.newValue ?? '{}')).toEqual({
+        logoUrl: 'https://res.cloudinary.com/demo/v2.png',
+      });
+    });
+
+    it('writes only BUSINESS_TIMEZONE_CHANGED when Settings sends unchanged fields with a new zone', async () => {
+      await repository.updateProfile(
+        BIZ,
+        {
+          name: 'Test Co',
+          currency: 'BDT',
+          address: ADDRESS,
+          timezone: 'America/New_York',
+        },
+        { userId: OWNER_USER_ID },
+      );
+
+      const rows = await listAudits(BIZ);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.action).toBe(BusinessAuditAction.TIMEZONE_CHANGED);
+      expect(JSON.parse(rows[0]!.previousValue ?? '{}')).toEqual({ timezone: 'Europe/London' });
+      expect(JSON.parse(rows[0]!.newValue ?? '{}')).toEqual({ timezone: 'America/New_York' });
+    });
+
+    it('writes no audit rows on a no-op save, a draft save, or a missing business', async () => {
+      await repository.updateProfile(
+        BIZ,
+        { name: 'Test Co', currency: 'BDT', timezone: 'Europe/London', address: ADDRESS },
+        { userId: OWNER_USER_ID },
+      );
+      await repository.updateProfile(MISSING, { name: 'Ghost' }, { userId: OWNER_USER_ID });
+      await repository.completeOnboarding(
+        MISSING,
+        { name: 'Ghost', currency: 'BDT', timezone: 'Asia/Dhaka', address: ADDRESS },
+        { userId: OWNER_USER_ID },
+      );
+      await getDb()
+        .update(businesses)
+        .set({ onboardingComplete: false })
+        .where(eq(businesses.id, BIZ));
+      await repository.saveDraft(BIZ, 'name', 'Draft Only');
+
+      expect(await listAudits(BIZ)).toEqual([]);
+      expect(await listAudits(MISSING)).toEqual([]);
     });
   });
 });

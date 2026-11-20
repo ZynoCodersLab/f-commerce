@@ -397,10 +397,14 @@ describe('Business Controller - PUT /me', () => {
     expect(res.body.data.currency).toBe('USD');
     expect(res.body.data.timezone).toBe('Asia/Dhaka');
     expect(res.body.message).toBe('Business profile updated');
-    expect(updateBusinessMock).toHaveBeenCalledWith('biz-target', {
-      name: 'Updated Name',
-      currency: 'USD',
-    });
+    expect(updateBusinessMock).toHaveBeenCalledWith(
+      'biz-target',
+      {
+        name: 'Updated Name',
+        currency: 'USD',
+      },
+      'user-1',
+    );
   });
 
   // covers AC-2: rejects invalid input with Zod validation details
@@ -442,7 +446,7 @@ describe('Business Controller - PUT /me', () => {
       .send({ currency: 'EUR' });
 
     expect(res.status).toBe(200);
-    expect(updateBusinessMock).toHaveBeenCalledWith('biz-target', { currency: 'EUR' });
+    expect(updateBusinessMock).toHaveBeenCalledWith('biz-target', { currency: 'EUR' }, 'user-1');
   });
 
   it('returns 404 when the business is not found during update', async () => {
@@ -472,7 +476,11 @@ describe('Business Controller - PUT /me', () => {
       .send({ timezone: 'asia/dhaka' });
 
     expect(res.status).toBe(200);
-    expect(updateBusinessMock).toHaveBeenCalledWith('biz-target', { timezone: 'Asia/Dhaka' });
+    expect(updateBusinessMock).toHaveBeenCalledWith(
+      'biz-target',
+      { timezone: 'Asia/Dhaka' },
+      'user-1',
+    );
     expect(res.body.data.timezone).toBe('Asia/Dhaka');
   });
 
@@ -495,7 +503,11 @@ describe('Business Controller - PUT /me', () => {
       .send({ timezone: 'Asia/Calcutta' });
 
     expect(res.status).toBe(200);
-    expect(updateBusinessMock).toHaveBeenCalledWith('biz-target', { timezone: canonical });
+    expect(updateBusinessMock).toHaveBeenCalledWith(
+      'biz-target',
+      { timezone: canonical },
+      'user-1',
+    );
     expect(res.body.data.timezone).toBe(canonical);
   });
 
@@ -550,13 +562,17 @@ describe('Business Controller - PUT /onboarding', () => {
     expect(res.body.data.name).toBe('Final Biz');
     expect(res.body.data.timezone).toBe('Asia/Dhaka');
     expect(res.body.message).toBe('Onboarding completed');
-    expect(completeOnboardingMock).toHaveBeenCalledWith('biz-target', {
-      name: 'Final Biz',
-      currency: 'USD',
-      timezone: 'Asia/Dhaka',
-      address: { street: '1 Main', city: 'Dhaka', country: 'Bangladesh' },
-      logoUrl: 'https://cdn.example.com/logo.png',
-    });
+    expect(completeOnboardingMock).toHaveBeenCalledWith(
+      'biz-target',
+      {
+        name: 'Final Biz',
+        currency: 'USD',
+        timezone: 'Asia/Dhaka',
+        address: { street: '1 Main', city: 'Dhaka', country: 'Bangladesh' },
+        logoUrl: 'https://cdn.example.com/logo.png',
+      },
+      'user-1',
+    );
   });
 
   it('canonicalizes the timezone before completing onboarding', async () => {
@@ -584,6 +600,7 @@ describe('Business Controller - PUT /onboarding', () => {
     expect(completeOnboardingMock).toHaveBeenCalledWith(
       'biz-target',
       expect.objectContaining({ timezone: 'Asia/Dhaka' }),
+      'user-1',
     );
   });
 
@@ -971,9 +988,13 @@ describe('Business Controller - POST /logo', () => {
     expect(res.body.data.logoUrl).toBe('https://cdn.example.com/logo.png');
     expect(res.body.message).toBe('Logo uploaded successfully');
     expect(uploadLogoMock).toHaveBeenCalled();
-    expect(updateBusinessMock).toHaveBeenCalledWith('biz-target', {
-      logoUrl: 'https://cdn.example.com/logo.png',
-    });
+    expect(updateBusinessMock).toHaveBeenCalledWith(
+      'biz-target',
+      {
+        logoUrl: 'https://cdn.example.com/logo.png',
+      },
+      'user-1',
+    );
   });
 
   // covers AC-3: rejects when no file is attached
