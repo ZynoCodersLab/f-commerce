@@ -39,29 +39,35 @@ Last reviewed: 2026-11-19.
       registers it). Locked with `frontend/eslint.config.test.ts`. Source:
       `docs/specs/0004-business-profile-onboarding/verify.md:41`.
 
-- [ ] **Repo hygiene.**
+- [x] **Repo hygiene.** Done 2026-11-21.
   - [x] Delete the tracked root scratch images `test-png.png`, `test-spoof.png`, and `test-valid.png`.
         Removed 2026-11-19.
   - [x] Remove the stale worktree for the already-merged `feat/next-security-upgrade` branch:
         `/home/devziaus/.local/share/opencode/worktree/f5e976/next-upgrade-security`. Removed 2026-11-19
         with `git worktree remove`; the branch itself is kept.
-  - [ ] Close the 2026-11-15 review nits (four separate items below). Source:
+  - [x] Close the 2026-11-15 review nits (four separate items below). Done 2026-11-21. Source:
         `docs/reviews/2026-11-15-feat-team-staff-invites.md`, section "Nits".
-  - [ ] Hardcoded `'send-invitation'` job name in `backend/src/infrastructure/queue/invite-queue.ts:71`.
-        `active.add()` takes the literal while the queue name is already an exported constant. Add an
-        `INVITE_JOB_NAME` constant and use it here. Cosmetic only: deduplication uses `jobId`
-        (`invite-${invitationId}-${tokenHash}`).
-  - [ ] Duplicate email schema. `auth.ts` defines its own `EmailSchema` with the same pipeline as
-        `TeamEmailSchema` in `team.ts`. The review judged it harmless and out of scope for a fix, so
-        decide: share one schema, or add a comment documenting the duplication. Don't leave it open.
-  - [ ] `frontend/src/lib/auth-guard.ts:61-62` (the `auth-guard.ts` nit). Add a comment that
-        `redirectAuthenticated` is intentionally ignored when `requireAuth: false`, so the formula
-        does not read like unnoticed dead logic. The review cited `:58`; the formula is at `:61-62`.
-  - [ ] Redundant re-throw in `backend/src/application/services/invite-worker.ts`. Confirm against
-        the retry path, then drop it if it is unreachable.
+  - [x] Hardcoded `'send-invitation'` job name in `backend/src/infrastructure/queue/invite-queue.ts:71`.
+        Done 2026-11-21. Exported `INVITE_JOB_NAME = 'send-invitation'` alongside
+        `INVITE_QUEUE_NAME`, used it in `active.add()`, and locked it in `invite-queue.test.ts`.
+  - [x] Duplicate email schema. Done 2026-11-21. Extracted a shared `EmailSchema` in
+        `packages/contracts/src/email.ts` (re-exported from `packages/contracts/src/index.ts`),
+        reused it in `auth.ts`, aliased `TeamEmailSchema = EmailSchema` in `team.ts`, and locked
+        the shared schema in `packages/contracts/src/email.test.ts`.
+  - [x] `frontend/src/lib/auth-guard.ts:61-62` (the `auth-guard.ts` nit). Done 2026-11-21. Added a
+        comment above `shouldRedirect` explaining the actual behavior: `redirectAuthenticated` is
+        ignored when `requireAuth: true`, and setting both `requireAuth: false` and
+        `redirectAuthenticated: false` intentionally collapses `shouldRedirect` to `false` while
+        still waiting for client hydration.
+  - [x] Redundant re-throw in `backend/src/application/services/invite-worker.ts`. Done 2026-11-21.
+        Confirmed against `worker.ts` and BullMQ's `shouldRetryJob` (`attemptsMade + 1 < attempts`):
+        the re-throw is reachable and required on earlier attempts to trigger retries, and on the
+        final attempt BullMQ does not schedule an extra retry and instead fires `worker.on('failed')`
+        so the crash is logged rather than swallowed. Kept the re-throw and documented why.
 
-- [ ] **Decide STAFF customer-notes visibility.** The spec default is yes but still asks for
-      confirmation. Answer it and close the item. Source: `docs/specs/0005-customers/index.md:202`.
+- [x] **Decide STAFF customer-notes visibility.** Done 2026-11-21. Confirmed: `STAFF` can see and edit
+      customer notes, matching the shipped API and UI behavior. Source:
+      `docs/specs/0005-customers/index.md:202`.
 
 ## P1: before the next feature if there is time
 
@@ -78,10 +84,6 @@ Last reviewed: 2026-11-19.
       limiters (`global`, `login-ip`, `login-account`, `register`, `refresh`, `upload`) to it with
       in process fail open fallback and `/health` skipping before touching Redis. Source:
       `docs/specs/0001-stack-and-architecture.md:143`.
-
-- [ ] **Add CI path filters.** Every pull request currently runs the full backend, Redis, worker,
-      Playwright, and build pipeline. Effort: S-M. Source:
-      `docs/specs/0001-stack-and-architecture.md:183`.
 
 ## P2: production readiness, not feature blockers
 
@@ -114,6 +116,9 @@ Last reviewed: 2026-11-19.
 - [ ] Collapse the duplicate business profile fetch when the business switcher lands.
 - [ ] Consider Cloudinary unsigned upload presets if backend upload load matters.
 - [ ] Remove the legacy `Unknown customer` rows once the old test data is disposable.
+- [ ] Add CI path filters if full-pipeline PR runs become slow or costly (deferred from P1 on
+      2026-11-21). Every pull request currently runs the full backend, Redis, worker, Playwright,
+      and build pipeline. Effort: S-M. Source: `docs/specs/0001-stack-and-architecture.md:183`.
 
 ## Source documents
 

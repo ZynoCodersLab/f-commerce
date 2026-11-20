@@ -23,6 +23,7 @@ vi.mock('./redis-connection.js', () => ({
 
 import {
   INVITE_JOB_BACKOFF_MS,
+  INVITE_JOB_NAME,
   closeInviteQueue,
   enqueueInviteEmail,
   inviteJobOptions,
@@ -51,7 +52,13 @@ describe('enqueueInviteEmail', () => {
     mocks.add.mockResolvedValueOnce({ remove: vi.fn() });
 
     await expect(enqueueInviteEmail(JOB)).resolves.toBe(true);
+    expect(INVITE_JOB_NAME).toBe('send-invitation');
     expect(mocks.add).toHaveBeenCalledTimes(1);
+    expect(mocks.add).toHaveBeenCalledWith(
+      INVITE_JOB_NAME,
+      JOB,
+      inviteJobOptions(JOB.invitationId, JOB.tokenHash),
+    );
   });
 
   it('removes a job that lands after the request already gave up', async () => {

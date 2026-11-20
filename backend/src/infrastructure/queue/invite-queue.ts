@@ -9,6 +9,9 @@ import { createRedisConnection } from './redis-connection.js';
 /** The single queue invitations travel through. */
 export const INVITE_QUEUE_NAME = 'invitation-email';
 
+/** The job name used when queueing an invitation email. */
+export const INVITE_JOB_NAME = 'send-invitation';
+
 export const INVITE_JOB_BACKOFF_MS = 60_000;
 
 /**
@@ -68,7 +71,7 @@ export async function enqueueInviteEmail(data: InviteEmailJobData): Promise<bool
   // the job, and a late job must be removed or the worker would send an email
   // the caller already recorded as failed.
   const added = active.add(
-    'send-invitation',
+    INVITE_JOB_NAME,
     data,
     inviteJobOptions(data.invitationId, data.tokenHash),
   );

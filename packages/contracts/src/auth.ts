@@ -1,11 +1,6 @@
 import { z } from 'zod';
 
-/** Stored addresses are trimmed and lowercased so casing never splits an account (AC-18). */
-const EmailSchema = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .pipe(z.string().email('Invalid email format').max(254));
+import { EmailSchema } from './email.js';
 
 export const RegisterSchema = z.object({
   email: EmailSchema,

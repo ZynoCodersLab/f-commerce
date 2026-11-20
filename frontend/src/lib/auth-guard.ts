@@ -58,6 +58,10 @@ export function useRequireAuth(options?: RequireAuthOptions): boolean {
     () => null,
   );
 
+  // On protected routes (requireAuth: true), only signed out visitors redirect
+  // and redirectAuthenticated is ignored. On public routes (requireAuth: false),
+  // setting redirectAuthenticated: false intentionally collapses this to false
+  // so nobody is redirected while the hook still waits for client hydration.
   const shouldRedirect =
     authed !== null && (requireAuth ? !authed : redirectAuthenticated && authed);
 
