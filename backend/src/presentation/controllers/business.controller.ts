@@ -20,11 +20,17 @@ import {
 import { sendInternalError } from './internal-error.js';
 
 function getActorUserId(req: Request): string | undefined {
-  const user = req.user as { userId?: string } | undefined;
-  if (typeof user?.userId === 'string' && user.userId.trim() !== '') {
-    return user.userId;
+  const user = req.user as { userId?: unknown } | undefined;
+  if (typeof user?.userId === 'string') {
+    const trimmed = user.userId.trim();
+    if (trimmed !== '') return trimmed;
   }
-  return requestContext?.getStore?.()?.userId;
+  const contextUserId = requestContext?.getStore?.()?.userId;
+  if (typeof contextUserId === 'string') {
+    const trimmed = contextUserId.trim();
+    if (trimmed !== '') return trimmed;
+  }
+  return undefined;
 }
 
 const upload = multer({

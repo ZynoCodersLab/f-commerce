@@ -8,11 +8,11 @@ interface Bucket {
 /**
  * A rate limit counter kept in this process.
  *
- * The team limiters fall back to this whenever Redis cannot answer, which is
- * the fail open rule from the spec: a busy or missing Redis slows nobody down,
- * but each instance still refuses obvious floods. Limits shared across
- * instances (invite bursts from many servers) need a shared store; this one is
- * the safety net, not the primary guard.
+ * All Redis-backed rate limiters (general and team) fall back to this whenever
+ * Redis cannot answer, which is the fail open rule: a busy or missing Redis
+ * slows nobody down, while each instance still refuses obvious floods. Limits
+ * shared across instances need a shared store; this one is the safety net, not
+ * the primary guard.
  */
 export class MemoryFallbackStore implements Store {
   private readonly buckets = new Map<string, Bucket>();

@@ -3,6 +3,7 @@ import request from 'supertest';
 import express from 'express';
 import { businessRouter } from './business.controller.js';
 import { ConflictError } from '../../domain/errors.js';
+import { requestContext } from '../../infrastructure/database/drizzle/context.js';
 
 // Use vi.hoisted to make mocks available before vi.mock factories run
 const {
@@ -1229,6 +1230,25 @@ describe('Business Controller - Missing audit actor', () => {
       message: 'Authentication required',
     });
     expect(uploadLogoMock).not.toHaveBeenCalled();
+    expect(updateBusinessMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects PUT /me with 401 when the requestContext fallback user id is blank', async () => {
+    vi.mocked(requestContext.getStore).mockReturnValueOnce({
+      businessId: 'biz-target',
+      userId: '   ',
+    });
+
+    const res = await request(appWithoutActor)
+      .put('/api/business/me')
+      .set('x-business-id', 'biz-target')
+      .send({ name: 'Should Not Save' });
+
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({
+      error: 'Authentication required',
+      message: 'Authentication required',
+    });
     expect(updateBusinessMock).not.toHaveBeenCalled();
   });
 });

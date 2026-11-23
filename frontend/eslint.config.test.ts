@@ -15,6 +15,7 @@ describe('frontend ESLint configuration', () => {
       'frontend/src/app/onboarding/page.tsx',
       'frontend/src/app/settings/team/page.tsx',
     ]);
+    expect(results).toHaveLength(3);
 
     const errors = results.flatMap((result) =>
       result.messages.filter((message) => message.severity === 2),
