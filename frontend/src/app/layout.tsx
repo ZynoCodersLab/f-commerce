@@ -1,8 +1,12 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { DM_Sans, IBM_Plex_Mono } from 'next/font/google';
 import { ThemeBoundary } from '@/components/theme/theme';
 import { BusinessSettingsProvider } from '@/components/business/business-settings-provider';
 import './globals.css';
+
+export const viewport: Viewport = {
+  colorScheme: 'light dark',
+};
 
 const dmSans = DM_Sans({
   variable: '--font-dm-sans',

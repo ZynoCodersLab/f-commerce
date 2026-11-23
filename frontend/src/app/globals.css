@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 
 :root {
+  color-scheme: light dark;
   --canvas: #f6f8fb;
   --surface: #ffffff;
   --surface-muted: #edf2f7;
@@ -23,7 +24,12 @@
   --on-danger: #ffffff;
 }
 
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
 :root[data-theme='dark'] {
+  color-scheme: dark;
   --canvas: #0b1220;
   --surface: #121c2c;
   --surface-muted: #1c2a3c;
@@ -44,6 +50,28 @@
   --danger-strong: #fca5a5;
   --danger-soft: #7f1d1d;
   --on-danger: #450a0a;
+}
+
+.app-logo-dark {
+  display: none;
+}
+
+:root[data-theme='dark'] .app-logo-light {
+  display: none;
+}
+
+:root[data-theme='dark'] .app-logo-dark {
+  display: block;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .app-logo-light {
+    display: none;
+  }
+
+  :root:not([data-theme='light']) .app-logo-dark {
+    display: block;
+  }
 }
 
 @theme inline {

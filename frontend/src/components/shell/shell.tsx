@@ -28,7 +28,7 @@ import {
   Sheet,
   StatusPill,
 } from '@/components/ui/primitives';
-import { ThemeToggle } from '@/components/theme/theme';
+import { ThemeToggle, useTheme } from '@/components/theme/theme';
 import { useBusinessSettings } from '@/components/business/business-settings-provider';
 import { logout } from '@/lib/auth-client';
 import { formatBusinessDayLabel, todayInTimeZone } from '@/lib/timezone';
@@ -135,6 +135,42 @@ function businessInitials(name: string): string {
   return `${words[0][0]}${words[1][0]}`.toUpperCase();
 }
 
+function AppLogo({
+  size,
+  imageClassName,
+  wrapperClassName,
+}: {
+  size: number;
+  imageClassName: string;
+  wrapperClassName?: string;
+}) {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+
+  return (
+    <span className={wrapperClassName}>
+      <Image
+        alt=""
+        className={`app-logo-light ${imageClassName}`}
+        height={size}
+        hidden={isDark}
+        src="/logo-light.png"
+        unoptimized
+        width={size}
+      />
+      <Image
+        alt=""
+        className={`app-logo-dark ${imageClassName}`}
+        height={size}
+        hidden={!isDark}
+        src="/logo-dark.png"
+        unoptimized
+        width={size}
+      />
+    </span>
+  );
+}
+
 function BusinessLogo({ logoUrl, name }: { logoUrl: string | null; name: string }) {
   if (logoUrl) {
     return (
@@ -185,14 +221,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         aria-label="Sidebar"
         className="fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-border bg-surface px-5 py-6 lg:flex"
       >
-        <div className="mb-10 flex items-center gap-3 px-3">
-          <Image
-            alt=""
-            className="size-16 shrink-0 rounded-md object-contain"
-            height={64}
-            src="/logo.png"
-            unoptimized
-            width={64}
+        <div className="mb-10 flex items-center gap-3 px-1">
+          <AppLogo
+            imageClassName="size-20 rounded-md object-contain"
+            size={80}
+            wrapperClassName="shrink-0"
           />
           <div>
             <p className="font-mono text-sm uppercase tracking-widest text-sky-strong">
@@ -240,13 +273,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="lg:flex lg:min-h-16 lg:items-center">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <Image
-                    alt=""
-                    className="size-9 shrink-0 rounded-md object-contain lg:hidden"
-                    height={36}
-                    src="/logo.png"
-                    unoptimized
-                    width={36}
+                  <AppLogo
+                    imageClassName="size-11 rounded-md object-contain"
+                    size={44}
+                    wrapperClassName="shrink-0 lg:hidden"
                   />
                   <p className="min-h-4 min-w-0 whitespace-nowrap font-mono text-[0.65rem] uppercase tracking-wide text-sky-strong">
                     {businessDay && businessDayLabel ? (
@@ -266,7 +296,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </div>
                 </div>
 
-                <div className="mt-2 pl-11 lg:mt-0 lg:pl-0">
+                <div className="mt-2 pl-13 lg:mt-0 lg:pl-0">
                   <Badge className="whitespace-nowrap lg:hidden">{badgeLabel}</Badge>
                   <h1 className="mt-2 text-lg font-semibold text-ink lg:mt-1">
                     Good morning, Maya

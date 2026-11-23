@@ -25,12 +25,29 @@ function getStoredTheme(): Theme {
 }
 
 function subscribeToTheme(onChange: () => void) {
+  const mediaQuery =
+    typeof window.matchMedia === 'function'
+      ? window.matchMedia('(prefers-color-scheme: dark)')
+      : null;
+
   window.addEventListener('f-commerce-theme-change', onChange);
   window.addEventListener('storage', onChange);
+  mediaQuery?.addEventListener?.('change', onChange);
   return () => {
     window.removeEventListener('f-commerce-theme-change', onChange);
     window.removeEventListener('storage', onChange);
+    mediaQuery?.removeEventListener?.('change', onChange);
   };
+}
+
+export function useTheme(): ThemeContextValue {
+  const context = useContext(ThemeContext);
+
+  if (!context) {
+    throw new Error('useTheme must be used within ThemeBoundary');
+  }
+
+  return context;
 }
 
 export function ThemeBoundary({ children }: { children: React.ReactNode }) {
@@ -59,20 +76,15 @@ export function ThemeBoundary({ children }: { children: React.ReactNode }) {
 }
 
 export function ThemeToggle() {
-  const context = useContext(ThemeContext);
-
-  if (!context) {
-    throw new Error('ThemeToggle must be used within ThemeBoundary');
-  }
-
-  const isDark = context.theme === 'dark';
+  const { theme, toggleTheme } = useTheme();
+  const isDark = theme === 'dark';
 
   return (
     <button
       type="button"
       className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-border bg-surface text-ink transition-colors hover:border-sky focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky"
       aria-label={isDark ? 'Use light theme' : 'Use dark theme'}
-      onClick={context.toggleTheme}
+      onClick={toggleTheme}
     >
       {isDark ? <Sun aria-hidden="true" size={18} /> : <Moon aria-hidden="true" size={18} />}
     </button>
