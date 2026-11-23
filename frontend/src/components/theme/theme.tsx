@@ -1,9 +1,15 @@
 'use client';
 
 import { Moon, Sun } from 'lucide-react';
-import { createContext, useContext, useEffect, useSyncExternalStore } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useSyncExternalStore } from 'react';
+import { THEME_STORAGE_KEY } from './theme-script';
 
 type Theme = 'light' | 'dark';
+
+// The theme attribute must land before paint, but `useLayoutEffect` warns when
+// a component renders on the server. There is no document there, so fall back
+// to `useEffect` for that pass.
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 type ThemeContextValue = {
   theme: Theme;
@@ -15,7 +21,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 function getStoredTheme(): Theme {
   if (typeof window === 'undefined') return 'light';
 
-  const stored = window.localStorage.getItem('f-commerce-theme');
+  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
   if (stored === 'dark' || stored === 'light') return stored;
 
   return typeof window.matchMedia === 'function' &&
@@ -53,13 +59,13 @@ export function useTheme(): ThemeContextValue {
 export function ThemeBoundary({ children }: { children: React.ReactNode }) {
   const theme = useSyncExternalStore(subscribeToTheme, getStoredTheme, () => 'light' as Theme);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
   const toggleTheme = () => {
     const nextTheme = theme === 'light' ? 'dark' : 'light';
-    window.localStorage.setItem('f-commerce-theme', nextTheme);
+    window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
     window.dispatchEvent(new Event('f-commerce-theme-change'));
   };
 

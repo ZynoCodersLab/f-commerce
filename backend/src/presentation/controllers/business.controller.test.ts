@@ -9,7 +9,6 @@ const mockBusinessRepository = {
   updateProfile: vi.fn(),
   completeOnboarding: vi.fn(),
   saveDraft: vi.fn(),
-  clearDraft: vi.fn(),
 } as unknown as Mocked<IBusinessRepository>;
 
 const mockCloudinaryService = {

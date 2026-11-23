@@ -28,7 +28,7 @@ import {
   Sheet,
   StatusPill,
 } from '@/components/ui/primitives';
-import { ThemeToggle, useTheme } from '@/components/theme/theme';
+import { ThemeToggle } from '@/components/theme/theme';
 import { useBusinessSettings } from '@/components/business/business-settings-provider';
 import { logout } from '@/lib/auth-client';
 import { formatBusinessDayLabel, todayInTimeZone } from '@/lib/timezone';
@@ -144,16 +144,12 @@ function AppLogo({
   imageClassName: string;
   wrapperClassName?: string;
 }) {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
-
   return (
     <span className={wrapperClassName}>
       <Image
         alt=""
         className={`app-logo-light ${imageClassName}`}
         height={size}
-        hidden={isDark}
         src="/logo-light.png"
         unoptimized
         width={size}
@@ -162,7 +158,6 @@ function AppLogo({
         alt=""
         className={`app-logo-dark ${imageClassName}`}
         height={size}
-        hidden={!isDark}
         src="/logo-dark.png"
         unoptimized
         width={size}

@@ -19,7 +19,6 @@ export interface BusinessUpdateData {
   timezone?: string;
   logoUrl?: string;
   address?: AddressData;
-  onboardingComplete?: boolean;
 }
 
 export class BusinessService {

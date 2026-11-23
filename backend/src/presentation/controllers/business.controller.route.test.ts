@@ -4,6 +4,7 @@ import express from 'express';
 import { businessRouter } from './business.controller.js';
 import { ConflictError } from '../../domain/errors.js';
 import { requestContext } from '../../infrastructure/database/drizzle/context.js';
+import { handleUnhandledError } from '../middlewares/error-handler.middleware.js';
 
 // Use vi.hoisted to make mocks available before vi.mock factories run
 const {
@@ -90,6 +91,8 @@ app.use('/api/business', (req, _res, next) => {
   next();
 });
 app.use('/api/business', businessRouter);
+// Match production: an async route failure reaches the project's JSON handler.
+app.use(handleUnhandledError);
 
 describe('Business Controller - Onboarding Gate', () => {
   beforeEach(() => {
@@ -1024,6 +1027,21 @@ describe('Business Controller - POST /logo', () => {
     );
   });
 
+  it('returns 404 when the business is missing at persistence time', async () => {
+    uploadLogoMock.mockResolvedValueOnce({ logoUrl: 'https://cdn.example.com/logo.png' });
+    updateBusinessMock.mockResolvedValueOnce(null);
+
+    const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
+
+    const res = await request(app)
+      .post('/api/business/logo')
+      .set('x-business-id', 'biz-target')
+      .attach('image', pngBuffer, 'logo.png');
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'Business not found', message: 'Business not found' });
+  });
+
   // covers AC-3: rejects when no file is attached
   it('returns 400 when no file is uploaded', async () => {
     const res = await request(app).post('/api/business/logo').set('x-business-id', 'biz-target');
@@ -1121,6 +1139,31 @@ describe('Business Controller - POST /logo', () => {
 
     expect(res.status).toBe(502);
     expect(res.body.error).toBe('Cloudinary upload failed');
+  });
+
+  // A persistence or audit failure is not a Cloudinary outage, so it must not
+  // borrow the upload error response.
+  it('returns 500 when persisting the uploaded logo fails', async () => {
+    uploadLogoMock.mockResolvedValueOnce({ logoUrl: 'https://cdn.example.com/logo.png' });
+    updateBusinessMock.mockRejectedValueOnce(new Error('audit insert failed'));
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
+
+      const res = await request(app)
+        .post('/api/business/logo')
+        .set('x-business-id', 'biz-target')
+        .attach('image', pngBuffer, 'logo.png');
+
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({
+        error: 'INTERNAL_ERROR',
+        message: 'The server could not complete the request.',
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   // covers AC-3: multer enforces 5MB file size limit

@@ -11,10 +11,8 @@ export interface IBusinessRepository {
       timezone?: string;
       address?: Business['address'];
       logoUrl?: string;
-      onboardingComplete?: boolean;
-      onboardingDraft?: Business['onboardingDraft'] | null;
     },
-    audit?: BusinessAuditActor,
+    audit: BusinessAuditActor,
   ): Promise<Business | null>;
   /**
    * Promote onboarding fields to the live profile, clear any remaining draft,
@@ -41,5 +39,4 @@ export interface IBusinessRepository {
    * business had already finished onboarding (or the id was not a UUID).
    */
   saveDraft(businessId: string, field: string, value: unknown): Promise<boolean>;
-  clearDraft(businessId: string): Promise<void>;
 }

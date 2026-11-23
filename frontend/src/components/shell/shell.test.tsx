@@ -6,6 +6,16 @@ import { ThemeBoundary } from '@/components/theme/theme';
 import { setAuth } from '@/lib/auth-client';
 import { AppShell } from './shell';
 
+// jsdom does not load globals.css, so mirror the app logo rules that decide
+// which image is visible. Keep these selectors in sync with globals.css.
+const appLogoStyles = document.createElement('style');
+appLogoStyles.textContent = `
+  .app-logo-dark { display: none; }
+  :root[data-theme='dark'] .app-logo-light { display: none; }
+  :root[data-theme='dark'] .app-logo-dark { display: block; }
+`;
+document.head.append(appLogoStyles);
+
 // The shell only reads settings; the provider has its own suite.
 const { nav, replaceMock, settings } = vi.hoisted(() => ({
   nav: { pathname: '/dashboard' },

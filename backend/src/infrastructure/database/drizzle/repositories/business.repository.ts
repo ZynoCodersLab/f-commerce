@@ -42,10 +42,8 @@ export class DrizzleBusinessRepository implements IBusinessRepository {
       timezone?: string;
       address?: Business['address'];
       logoUrl?: string;
-      onboardingComplete?: boolean;
-      onboardingDraft?: Business['onboardingDraft'] | null;
     },
-    audit?: BusinessAuditActor,
+    audit: BusinessAuditActor,
   ): Promise<Business | null> {
     if (!isUuid(id)) return null;
 
@@ -55,17 +53,6 @@ export class DrizzleBusinessRepository implements IBusinessRepository {
     if (data.timezone !== undefined) changes.timezone = data.timezone;
     if (data.logoUrl !== undefined) changes.logoUrl = data.logoUrl || null;
     if (data.address !== undefined) changes.address = data.address;
-    if (data.onboardingComplete !== undefined) changes.onboardingComplete = data.onboardingComplete;
-    if (data.onboardingDraft !== undefined) changes.onboardingDraft = data.onboardingDraft;
-
-    if (!audit) {
-      const result = await getDb()
-        .update(businesses)
-        .set(changes)
-        .where(eq(businesses.id, id))
-        .returning();
-      return result.length > 0 ? toBusiness(result[0]) : null;
-    }
 
     // Lock the business row before updating so concurrent profile edits never
     // compute a stale previousValue, and commit the profile and audit rows
@@ -155,8 +142,8 @@ export class DrizzleBusinessRepository implements IBusinessRepository {
    * Merge one draft field, preserving every other field already saved.
    * A completed business has no draft, so the write is skipped once onboarding
    * finishes. That closes the race where a draft request is already in flight
-   * when onboarding completes: if it lands after `clearDraft`, the completed
-   * row is left untouched instead of gaining a stale draft.
+   * when onboarding completes: if it lands after onboarding finishes, the
+   * completed row is left untouched instead of gaining a stale draft.
    *
    * @returns true when the write landed, false when the guard skipped it, so a
    * caller can answer honestly instead of reporting a save that never happened.
@@ -175,14 +162,5 @@ export class DrizzleBusinessRepository implements IBusinessRepository {
       .returning({ id: businesses.id });
 
     return updated.length > 0;
-  }
-
-  async clearDraft(businessId: string): Promise<void> {
-    if (!isUuid(businessId)) return;
-
-    await getDb()
-      .update(businesses)
-      .set({ onboardingDraft: null, updatedAt: new Date() })
-      .where(eq(businesses.id, businessId));
   }
 }

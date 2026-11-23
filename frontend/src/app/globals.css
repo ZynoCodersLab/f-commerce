@@ -64,16 +64,6 @@
   display: block;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .app-logo-light {
-    display: none;
-  }
-
-  :root:not([data-theme='light']) .app-logo-dark {
-    display: block;
-  }
-}
-
 @theme inline {
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);

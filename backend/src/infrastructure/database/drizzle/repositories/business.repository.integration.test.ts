@@ -88,11 +88,15 @@ describe('DrizzleBusinessRepository', () => {
 
   describe('updateProfile', () => {
     it('updates only the provided fields and returns the stored row', async () => {
-      const result = await repository.updateProfile(BIZ, {
-        name: 'Updated Name',
-        currency: 'USD',
-        timezone: 'America/New_York',
-      });
+      const result = await repository.updateProfile(
+        BIZ,
+        {
+          name: 'Updated Name',
+          currency: 'USD',
+          timezone: 'America/New_York',
+        },
+        { userId: OWNER_USER_ID },
+      );
 
       expect(result?.name).toBe('Updated Name');
       expect(result?.currency).toBe('USD');
@@ -103,15 +107,17 @@ describe('DrizzleBusinessRepository', () => {
     });
 
     it('leaves absent fields untouched when the caller passes undefined', async () => {
-      const result = await repository.updateProfile(BIZ, {
-        name: 'New',
-        currency: undefined,
-        timezone: undefined,
-        logoUrl: undefined,
-        address: undefined,
-        onboardingComplete: undefined,
-        onboardingDraft: undefined,
-      });
+      const result = await repository.updateProfile(
+        BIZ,
+        {
+          name: 'New',
+          currency: undefined,
+          timezone: undefined,
+          logoUrl: undefined,
+          address: undefined,
+        },
+        { userId: OWNER_USER_ID },
+      );
 
       expect(result?.name).toBe('New');
       expect(result?.currency).toBe('BDT');
@@ -119,25 +125,21 @@ describe('DrizzleBusinessRepository', () => {
       expect(result?.onboardingDraft).toEqual({ name: 'Draft Co', currency: 'USD' });
     });
 
-    it('persists onboardingComplete and onboardingDraft when provided', async () => {
-      const result = await repository.updateProfile(BIZ, {
-        onboardingComplete: false,
-        onboardingDraft: { name: 'Draft', currency: 'EUR' },
-      });
-
-      expect(result?.onboardingComplete).toBe(false);
-      expect(result?.onboardingDraft).toEqual({ name: 'Draft', currency: 'EUR' });
-    });
-
     it('returns null when the row is not found', async () => {
-      expect(await repository.updateProfile(MISSING, { name: 'X' })).toBeNull();
+      expect(
+        await repository.updateProfile(MISSING, { name: 'X' }, { userId: OWNER_USER_ID }),
+      ).toBeNull();
     });
 
     // Onboarding sends '' for "no logo". The store keeps it, so the read must
     // hand back undefined: otherwise the profile answers '' where the response
     // contract allows only a URL or null.
     it('stores an empty logo as no logo and reads it back as undefined', async () => {
-      const result = await repository.updateProfile(BIZ, { logoUrl: '' });
+      const result = await repository.updateProfile(
+        BIZ,
+        { logoUrl: '' },
+        { userId: OWNER_USER_ID },
+      );
 
       expect(result?.logoUrl).toBeUndefined();
       expect(await repository.findById(BIZ)).toMatchObject({ logoUrl: undefined });
@@ -185,8 +187,10 @@ describe('DrizzleBusinessRepository', () => {
     });
 
     it('does not resurrect a draft once onboarding is complete', async () => {
-      await repository.clearDraft(BIZ);
-      await repository.updateProfile(BIZ, { onboardingComplete: true });
+      await getDb()
+        .update(businesses)
+        .set({ onboardingComplete: true, onboardingDraft: null })
+        .where(eq(businesses.id, BIZ));
 
       // Simulates a draft request that was in flight when onboarding finished.
       const saved = await repository.saveDraft(BIZ, 'timezone', 'America/New_York');
@@ -218,20 +222,15 @@ describe('DrizzleBusinessRepository', () => {
     });
   });
 
-  describe('clearDraft', () => {
-    it('unsets the onboarding draft', async () => {
-      await repository.clearDraft(BIZ);
-
-      const result = await repository.findById(BIZ);
-      expect(result?.onboardingDraft).toBeUndefined();
-    });
-  });
-
   describe('tenant isolation', () => {
     it('scopes updates and drafts to the addressed business row', async () => {
       await getDb().insert(businesses).values({ id: OTHER, name: 'Other Co', currency: 'USD' });
 
-      await repository.updateProfile(BIZ, { name: 'Renamed Co', currency: 'EUR' });
+      await repository.updateProfile(
+        BIZ,
+        { name: 'Renamed Co', currency: 'EUR' },
+        { userId: OWNER_USER_ID },
+      );
       await repository.saveDraft(OTHER, 'name', 'Other Draft');
 
       const mine = await repository.findById(BIZ);
