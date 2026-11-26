@@ -1,9 +1,11 @@
 import type { Server } from 'node:http';
 import express from 'express';
+import { Redis } from 'ioredis';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const testIp = '198.51.100.240';
+let closeStore: (() => Promise<void>) | null = null;
 
 function closeServer(server: Server): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -11,9 +13,45 @@ function closeServer(server: Server): Promise<void> {
   });
 }
 
-async function startRegisterApp(): Promise<Server> {
+async function clearRegisterKeys(redisUrl: string): Promise<boolean> {
+  const redis = new Redis(redisUrl, { maxRetriesPerRequest: 1, connectTimeout: 1_000 });
+  redis.on('error', () => {
+    // Offline runs use the in process fallback.
+  });
+  try {
+    const up = await redis
+      .ping()
+      .then(() => true)
+      .catch(() => false);
+    if (!up) return false;
+    let cursor = '0';
+    do {
+      const [next, keys] = await redis.scan(cursor, 'MATCH', 'ratelimit:register:*', 'COUNT', 100);
+      cursor = next;
+      if (keys.length > 0) await redis.del(...keys);
+    } while (cursor !== '0');
+    return true;
+  } finally {
+    redis.disconnect();
+  }
+}
+
+async function startRegisterApp(prepareRedis = false): Promise<Server> {
   const { registerRateLimiter } = await import('./rate-limit.middleware.js');
+  const { closeRateLimitStore, getRateLimitRedisClient } =
+    await import('./redis-rate-limit-store.js');
+  const { config } = await import('../../infrastructure/config.js');
+  closeStore = closeRateLimitStore;
+
+  if (prepareRedis && (await clearRegisterKeys(config.REDIS_URL))) {
+    const client = getRateLimitRedisClient();
+    if (client.status !== 'ready') {
+      await new Promise<void>((resolve) => client.once('ready', () => resolve()));
+    }
+  }
+
   const app = express();
+  app.set('trust proxy', 1);
 
   app.post('/register', registerRateLimiter, (_request, response) => {
     response.status(201).json({ ok: true });
@@ -22,7 +60,11 @@ async function startRegisterApp(): Promise<Server> {
   return app.listen(0);
 }
 
-afterEach(() => {
+afterEach(async () => {
+  if (closeStore) {
+    await closeStore();
+    closeStore = null;
+  }
   vi.unstubAllEnvs();
   vi.resetModules();
 });
@@ -59,7 +101,7 @@ describe('rate limiter escape hatch', () => {
     vi.stubEnv('RESEND_API_KEY', 're_test_key');
     vi.stubEnv('EMAIL_FROM', 'F Commerce <team@example.com>');
 
-    const server = await startRegisterApp();
+    const server = await startRegisterApp(true);
 
     try {
       for (let attempt = 0; attempt < 5; attempt += 1) {

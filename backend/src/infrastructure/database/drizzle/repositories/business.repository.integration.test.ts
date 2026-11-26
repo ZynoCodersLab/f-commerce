@@ -1,12 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { asc, eq } from 'drizzle-orm';
+import { BusinessAuditAction, BusinessAuditEntity } from '@f-commerce/contracts';
 import { DrizzleBusinessRepository } from './business.repository.js';
 import { getDb } from '../client.js';
-import { businesses } from '../schema.js';
+import { auditLogs, businesses } from '../schema.js';
+import { ConflictError } from '../../../../domain/errors.js';
 import { startPg, stopPg, resetDatabase } from '../../../../test-support/pg-test-database.js';
 
 const BIZ = '00000000-0000-0000-0000-000000000011';
 const OTHER = '00000000-0000-0000-0000-000000000012';
 const MISSING = '00000000-0000-0000-0000-00000000dead';
+const OWNER_USER_ID = '00000000-0000-0000-0000-0000000000aa';
 
 const ADDRESS = {
   street: '123 Main St',
@@ -84,11 +88,15 @@ describe('DrizzleBusinessRepository', () => {
 
   describe('updateProfile', () => {
     it('updates only the provided fields and returns the stored row', async () => {
-      const result = await repository.updateProfile(BIZ, {
-        name: 'Updated Name',
-        currency: 'USD',
-        timezone: 'America/New_York',
-      });
+      const result = await repository.updateProfile(
+        BIZ,
+        {
+          name: 'Updated Name',
+          currency: 'USD',
+          timezone: 'America/New_York',
+        },
+        { userId: OWNER_USER_ID },
+      );
 
       expect(result?.name).toBe('Updated Name');
       expect(result?.currency).toBe('USD');
@@ -99,15 +107,17 @@ describe('DrizzleBusinessRepository', () => {
     });
 
     it('leaves absent fields untouched when the caller passes undefined', async () => {
-      const result = await repository.updateProfile(BIZ, {
-        name: 'New',
-        currency: undefined,
-        timezone: undefined,
-        logoUrl: undefined,
-        address: undefined,
-        onboardingComplete: undefined,
-        onboardingDraft: undefined,
-      });
+      const result = await repository.updateProfile(
+        BIZ,
+        {
+          name: 'New',
+          currency: undefined,
+          timezone: undefined,
+          logoUrl: undefined,
+          address: undefined,
+        },
+        { userId: OWNER_USER_ID },
+      );
 
       expect(result?.name).toBe('New');
       expect(result?.currency).toBe('BDT');
@@ -115,25 +125,21 @@ describe('DrizzleBusinessRepository', () => {
       expect(result?.onboardingDraft).toEqual({ name: 'Draft Co', currency: 'USD' });
     });
 
-    it('persists onboardingComplete and onboardingDraft when provided', async () => {
-      const result = await repository.updateProfile(BIZ, {
-        onboardingComplete: false,
-        onboardingDraft: { name: 'Draft', currency: 'EUR' },
-      });
-
-      expect(result?.onboardingComplete).toBe(false);
-      expect(result?.onboardingDraft).toEqual({ name: 'Draft', currency: 'EUR' });
-    });
-
     it('returns null when the row is not found', async () => {
-      expect(await repository.updateProfile(MISSING, { name: 'X' })).toBeNull();
+      expect(
+        await repository.updateProfile(MISSING, { name: 'X' }, { userId: OWNER_USER_ID }),
+      ).toBeNull();
     });
 
     // Onboarding sends '' for "no logo". The store keeps it, so the read must
     // hand back undefined: otherwise the profile answers '' where the response
     // contract allows only a URL or null.
     it('stores an empty logo as no logo and reads it back as undefined', async () => {
-      const result = await repository.updateProfile(BIZ, { logoUrl: '' });
+      const result = await repository.updateProfile(
+        BIZ,
+        { logoUrl: '' },
+        { userId: OWNER_USER_ID },
+      );
 
       expect(result?.logoUrl).toBeUndefined();
       expect(await repository.findById(BIZ)).toMatchObject({ logoUrl: undefined });
@@ -181,8 +187,10 @@ describe('DrizzleBusinessRepository', () => {
     });
 
     it('does not resurrect a draft once onboarding is complete', async () => {
-      await repository.clearDraft(BIZ);
-      await repository.updateProfile(BIZ, { onboardingComplete: true });
+      await getDb()
+        .update(businesses)
+        .set({ onboardingComplete: true, onboardingDraft: null })
+        .where(eq(businesses.id, BIZ));
 
       // Simulates a draft request that was in flight when onboarding finished.
       const saved = await repository.saveDraft(BIZ, 'timezone', 'America/New_York');
@@ -214,20 +222,15 @@ describe('DrizzleBusinessRepository', () => {
     });
   });
 
-  describe('clearDraft', () => {
-    it('unsets the onboarding draft', async () => {
-      await repository.clearDraft(BIZ);
-
-      const result = await repository.findById(BIZ);
-      expect(result?.onboardingDraft).toBeUndefined();
-    });
-  });
-
   describe('tenant isolation', () => {
     it('scopes updates and drafts to the addressed business row', async () => {
       await getDb().insert(businesses).values({ id: OTHER, name: 'Other Co', currency: 'USD' });
 
-      await repository.updateProfile(BIZ, { name: 'Renamed Co', currency: 'EUR' });
+      await repository.updateProfile(
+        BIZ,
+        { name: 'Renamed Co', currency: 'EUR' },
+        { userId: OWNER_USER_ID },
+      );
       await repository.saveDraft(OTHER, 'name', 'Other Draft');
 
       const mine = await repository.findById(BIZ);
@@ -238,6 +241,194 @@ describe('DrizzleBusinessRepository', () => {
       expect(mine?.onboardingDraft).toEqual({ name: 'Draft Co', currency: 'USD' });
       expect(other?.name).toBe('Other Co');
       expect(other?.onboardingDraft).toEqual({ name: 'Other Draft' });
+    });
+  });
+
+  describe('audit rows', () => {
+    async function listAudits(businessId: string) {
+      return getDb()
+        .select()
+        .from(auditLogs)
+        .where(eq(auditLogs.businessId, businessId))
+        .orderBy(asc(auditLogs.createdAt), asc(auditLogs.action));
+    }
+
+    it('records onboarding completion and clears the draft in one transaction', async () => {
+      await getDb()
+        .update(businesses)
+        .set({
+          onboardingComplete: false,
+          onboardingDraft: { name: 'Draft Co', currency: 'USD' },
+        })
+        .where(eq(businesses.id, BIZ));
+
+      const updated = await repository.completeOnboarding(
+        BIZ,
+        {
+          name: 'Launched Co',
+          currency: 'USD',
+          timezone: 'America/New_York',
+          address: ADDRESS,
+          logoUrl: 'https://res.cloudinary.com/demo/launched.png',
+        },
+        { userId: OWNER_USER_ID },
+      );
+
+      expect(updated?.onboardingComplete).toBe(true);
+      expect(updated?.onboardingDraft).toBeUndefined();
+
+      const rows = await listAudits(BIZ);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        businessId: BIZ,
+        userId: OWNER_USER_ID,
+        action: BusinessAuditAction.ONBOARDING_COMPLETED,
+        entityType: BusinessAuditEntity.BUSINESS,
+        entityId: BIZ,
+      });
+      expect(JSON.parse(rows[0]!.previousValue ?? '{}')).toMatchObject({
+        name: 'Test Co',
+        currency: 'BDT',
+        timezone: 'Europe/London',
+        onboardingComplete: false,
+      });
+      expect(JSON.parse(rows[0]!.newValue ?? '{}')).toMatchObject({
+        name: 'Launched Co',
+        currency: 'USD',
+        timezone: 'America/New_York',
+        logoUrl: 'https://res.cloudinary.com/demo/launched.png',
+        onboardingComplete: true,
+      });
+    });
+
+    it('rejects a second onboarding completion without changing the first profile', async () => {
+      await getDb()
+        .update(businesses)
+        .set({
+          onboardingComplete: false,
+          onboardingDraft: { name: 'Draft Co', currency: 'USD' },
+        })
+        .where(eq(businesses.id, BIZ));
+
+      await repository.completeOnboarding(
+        BIZ,
+        {
+          name: 'Launched Co',
+          currency: 'USD',
+          timezone: 'America/New_York',
+          address: ADDRESS,
+          logoUrl: 'https://res.cloudinary.com/demo/launched.png',
+        },
+        { userId: OWNER_USER_ID },
+      );
+
+      await expect(
+        repository.completeOnboarding(
+          BIZ,
+          {
+            name: 'Overwritten Co',
+            currency: 'EUR',
+            timezone: 'Europe/Berlin',
+            address: { ...ADDRESS, city: 'Berlin', country: 'Germany' },
+            logoUrl: 'https://res.cloudinary.com/demo/overwritten.png',
+          },
+          { userId: OWNER_USER_ID },
+        ),
+      ).rejects.toBeInstanceOf(ConflictError);
+
+      expect(await repository.findById(BIZ)).toMatchObject({
+        name: 'Launched Co',
+        currency: 'USD',
+        timezone: 'America/New_York',
+        logoUrl: 'https://res.cloudinary.com/demo/launched.png',
+        address: ADDRESS,
+        onboardingComplete: true,
+      });
+
+      const rows = await listAudits(BIZ);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.action).toBe(BusinessAuditAction.ONBOARDING_COMPLETED);
+    });
+
+    it('writes profile, timezone, and logo audit rows for changed fields only', async () => {
+      await repository.updateProfile(
+        BIZ,
+        {
+          name: 'Renamed Co',
+          currency: 'BDT',
+          timezone: 'Asia/Dhaka',
+          logoUrl: 'https://res.cloudinary.com/demo/v2.png',
+        },
+        { userId: OWNER_USER_ID },
+      );
+
+      const rows = await listAudits(BIZ);
+      expect(rows.map((row) => row.action)).toEqual([
+        BusinessAuditAction.LOGO_UPDATED,
+        BusinessAuditAction.PROFILE_UPDATED,
+        BusinessAuditAction.TIMEZONE_CHANGED,
+      ]);
+
+      const byAction = Object.fromEntries(rows.map((row) => [row.action, row]));
+      expect(
+        JSON.parse(byAction[BusinessAuditAction.PROFILE_UPDATED]!.previousValue ?? '{}'),
+      ).toEqual({ name: 'Test Co' });
+      expect(JSON.parse(byAction[BusinessAuditAction.PROFILE_UPDATED]!.newValue ?? '{}')).toEqual({
+        name: 'Renamed Co',
+      });
+      expect(
+        JSON.parse(byAction[BusinessAuditAction.TIMEZONE_CHANGED]!.previousValue ?? '{}'),
+      ).toEqual({ timezone: 'Europe/London' });
+      expect(JSON.parse(byAction[BusinessAuditAction.TIMEZONE_CHANGED]!.newValue ?? '{}')).toEqual({
+        timezone: 'Asia/Dhaka',
+      });
+      expect(JSON.parse(byAction[BusinessAuditAction.LOGO_UPDATED]!.previousValue ?? '{}')).toEqual(
+        { logoUrl: 'https://res.cloudinary.com/demo/img.png' },
+      );
+      expect(JSON.parse(byAction[BusinessAuditAction.LOGO_UPDATED]!.newValue ?? '{}')).toEqual({
+        logoUrl: 'https://res.cloudinary.com/demo/v2.png',
+      });
+    });
+
+    it('writes only BUSINESS_TIMEZONE_CHANGED when Settings sends unchanged fields with a new zone', async () => {
+      await repository.updateProfile(
+        BIZ,
+        {
+          name: 'Test Co',
+          currency: 'BDT',
+          address: ADDRESS,
+          timezone: 'America/New_York',
+        },
+        { userId: OWNER_USER_ID },
+      );
+
+      const rows = await listAudits(BIZ);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.action).toBe(BusinessAuditAction.TIMEZONE_CHANGED);
+      expect(JSON.parse(rows[0]!.previousValue ?? '{}')).toEqual({ timezone: 'Europe/London' });
+      expect(JSON.parse(rows[0]!.newValue ?? '{}')).toEqual({ timezone: 'America/New_York' });
+    });
+
+    it('writes no audit rows on a no-op save, a draft save, or a missing business', async () => {
+      await repository.updateProfile(
+        BIZ,
+        { name: 'Test Co', currency: 'BDT', timezone: 'Europe/London', address: ADDRESS },
+        { userId: OWNER_USER_ID },
+      );
+      await repository.updateProfile(MISSING, { name: 'Ghost' }, { userId: OWNER_USER_ID });
+      await repository.completeOnboarding(
+        MISSING,
+        { name: 'Ghost', currency: 'BDT', timezone: 'Asia/Dhaka', address: ADDRESS },
+        { userId: OWNER_USER_ID },
+      );
+      await getDb()
+        .update(businesses)
+        .set({ onboardingComplete: false })
+        .where(eq(businesses.id, BIZ));
+      await repository.saveDraft(BIZ, 'name', 'Draft Only');
+
+      expect(await listAudits(BIZ)).toEqual([]);
+      expect(await listAudits(MISSING)).toEqual([]);
     });
   });
 });

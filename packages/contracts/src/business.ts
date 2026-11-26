@@ -2,6 +2,25 @@ import { z } from 'zod';
 
 export const CurrencyEnum = z.enum(['BDT', 'USD', 'EUR', 'GBP']);
 
+/** Action codes recorded when a business profile changes. */
+export const BusinessAuditAction = {
+  ONBOARDING_COMPLETED: 'BUSINESS_ONBOARDING_COMPLETED',
+  PROFILE_UPDATED: 'BUSINESS_PROFILE_UPDATED',
+  LOGO_UPDATED: 'BUSINESS_LOGO_UPDATED',
+  TIMEZONE_CHANGED: 'BUSINESS_TIMEZONE_CHANGED',
+} as const;
+
+export type BusinessAuditActionType =
+  (typeof BusinessAuditAction)[keyof typeof BusinessAuditAction];
+
+/** Audit entity types written by the business feature. */
+export const BusinessAuditEntity = {
+  BUSINESS: 'Business',
+} as const;
+
+export type BusinessAuditEntityType =
+  (typeof BusinessAuditEntity)[keyof typeof BusinessAuditEntity];
+
 /**
  * A bare `UTC` or an `Area/Location` style IANA ID. This rejects fixed offsets
  * such as `+06:00` and abbreviations such as `BST`, both of which the runtime

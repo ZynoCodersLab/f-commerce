@@ -60,6 +60,15 @@ describe('useRequireAuth', () => {
       await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/login'));
       expect(result.current).toBe(false);
     });
+
+    it('ignores redirectAuthenticated: false and still redirects signed out visitors to /login', () => {
+      const { result } = renderHook(() =>
+        useRequireAuth({ requireAuth: true, redirectAuthenticated: false }),
+      );
+
+      expect(replaceMock).toHaveBeenCalledWith('/login');
+      expect(result.current).toBe(false);
+    });
   });
 
   describe('public-only route (requireAuth: false)', () => {

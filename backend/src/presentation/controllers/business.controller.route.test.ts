@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import { businessRouter } from './business.controller.js';
+import { ConflictError } from '../../domain/errors.js';
+import { requestContext } from '../../infrastructure/database/drizzle/context.js';
+import { handleUnhandledError } from '../middlewares/error-handler.middleware.js';
 
 // Use vi.hoisted to make mocks available before vi.mock factories run
 const {
@@ -69,6 +72,9 @@ vi.mock('../middlewares/rate-limit.middleware.js', () => ({
 vi.mock('../../infrastructure/database/drizzle/context.js', () => ({
   runWithContext: vi.fn((_ctx, fn) => fn()),
   getTenantId: vi.fn(() => 'biz-target'),
+  requestContext: {
+    getStore: vi.fn(() => undefined),
+  },
 }));
 
 const app = express();
@@ -85,6 +91,8 @@ app.use('/api/business', (req, _res, next) => {
   next();
 });
 app.use('/api/business', businessRouter);
+// Match production: an async route failure reaches the project's JSON handler.
+app.use(handleUnhandledError);
 
 describe('Business Controller - Onboarding Gate', () => {
   beforeEach(() => {
@@ -397,10 +405,14 @@ describe('Business Controller - PUT /me', () => {
     expect(res.body.data.currency).toBe('USD');
     expect(res.body.data.timezone).toBe('Asia/Dhaka');
     expect(res.body.message).toBe('Business profile updated');
-    expect(updateBusinessMock).toHaveBeenCalledWith('biz-target', {
-      name: 'Updated Name',
-      currency: 'USD',
-    });
+    expect(updateBusinessMock).toHaveBeenCalledWith(
+      'biz-target',
+      {
+        name: 'Updated Name',
+        currency: 'USD',
+      },
+      'user-1',
+    );
   });
 
   // covers AC-2: rejects invalid input with Zod validation details
@@ -442,7 +454,7 @@ describe('Business Controller - PUT /me', () => {
       .send({ currency: 'EUR' });
 
     expect(res.status).toBe(200);
-    expect(updateBusinessMock).toHaveBeenCalledWith('biz-target', { currency: 'EUR' });
+    expect(updateBusinessMock).toHaveBeenCalledWith('biz-target', { currency: 'EUR' }, 'user-1');
   });
 
   it('returns 404 when the business is not found during update', async () => {
@@ -472,7 +484,11 @@ describe('Business Controller - PUT /me', () => {
       .send({ timezone: 'asia/dhaka' });
 
     expect(res.status).toBe(200);
-    expect(updateBusinessMock).toHaveBeenCalledWith('biz-target', { timezone: 'Asia/Dhaka' });
+    expect(updateBusinessMock).toHaveBeenCalledWith(
+      'biz-target',
+      { timezone: 'Asia/Dhaka' },
+      'user-1',
+    );
     expect(res.body.data.timezone).toBe('Asia/Dhaka');
   });
 
@@ -495,7 +511,11 @@ describe('Business Controller - PUT /me', () => {
       .send({ timezone: 'Asia/Calcutta' });
 
     expect(res.status).toBe(200);
-    expect(updateBusinessMock).toHaveBeenCalledWith('biz-target', { timezone: canonical });
+    expect(updateBusinessMock).toHaveBeenCalledWith(
+      'biz-target',
+      { timezone: canonical },
+      'user-1',
+    );
     expect(res.body.data.timezone).toBe(canonical);
   });
 
@@ -550,13 +570,17 @@ describe('Business Controller - PUT /onboarding', () => {
     expect(res.body.data.name).toBe('Final Biz');
     expect(res.body.data.timezone).toBe('Asia/Dhaka');
     expect(res.body.message).toBe('Onboarding completed');
-    expect(completeOnboardingMock).toHaveBeenCalledWith('biz-target', {
-      name: 'Final Biz',
-      currency: 'USD',
-      timezone: 'Asia/Dhaka',
-      address: { street: '1 Main', city: 'Dhaka', country: 'Bangladesh' },
-      logoUrl: 'https://cdn.example.com/logo.png',
-    });
+    expect(completeOnboardingMock).toHaveBeenCalledWith(
+      'biz-target',
+      {
+        name: 'Final Biz',
+        currency: 'USD',
+        timezone: 'Asia/Dhaka',
+        address: { street: '1 Main', city: 'Dhaka', country: 'Bangladesh' },
+        logoUrl: 'https://cdn.example.com/logo.png',
+      },
+      'user-1',
+    );
   });
 
   it('canonicalizes the timezone before completing onboarding', async () => {
@@ -584,6 +608,7 @@ describe('Business Controller - PUT /onboarding', () => {
     expect(completeOnboardingMock).toHaveBeenCalledWith(
       'biz-target',
       expect.objectContaining({ timezone: 'Asia/Dhaka' }),
+      'user-1',
     );
   });
 
@@ -695,6 +720,28 @@ describe('Business Controller - PUT /onboarding', () => {
 
     expect(res.status).toBe(404);
     expect(res.body.error).toBe('Business not found');
+  });
+
+  it('returns 409 when onboarding is already complete', async () => {
+    completeOnboardingMock.mockRejectedValueOnce(
+      new ConflictError('Onboarding is already complete'),
+    );
+
+    const res = await request(app)
+      .put('/api/business/onboarding')
+      .set('x-business-id', 'biz-target')
+      .send({
+        name: 'Biz',
+        currency: 'USD',
+        timezone: 'Asia/Dhaka',
+        address: { street: '1 St', city: 'City', country: 'US' },
+      });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      error: 'ONBOARDING_COMPLETE',
+      message: 'Onboarding is already complete',
+    });
   });
 
   it('completes onboarding without a logoUrl', async () => {
@@ -971,9 +1018,28 @@ describe('Business Controller - POST /logo', () => {
     expect(res.body.data.logoUrl).toBe('https://cdn.example.com/logo.png');
     expect(res.body.message).toBe('Logo uploaded successfully');
     expect(uploadLogoMock).toHaveBeenCalled();
-    expect(updateBusinessMock).toHaveBeenCalledWith('biz-target', {
-      logoUrl: 'https://cdn.example.com/logo.png',
-    });
+    expect(updateBusinessMock).toHaveBeenCalledWith(
+      'biz-target',
+      {
+        logoUrl: 'https://cdn.example.com/logo.png',
+      },
+      'user-1',
+    );
+  });
+
+  it('returns 404 when the business is missing at persistence time', async () => {
+    uploadLogoMock.mockResolvedValueOnce({ logoUrl: 'https://cdn.example.com/logo.png' });
+    updateBusinessMock.mockResolvedValueOnce(null);
+
+    const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
+
+    const res = await request(app)
+      .post('/api/business/logo')
+      .set('x-business-id', 'biz-target')
+      .attach('image', pngBuffer, 'logo.png');
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'Business not found', message: 'Business not found' });
   });
 
   // covers AC-3: rejects when no file is attached
@@ -1075,6 +1141,31 @@ describe('Business Controller - POST /logo', () => {
     expect(res.body.error).toBe('Cloudinary upload failed');
   });
 
+  // A persistence or audit failure is not a Cloudinary outage, so it must not
+  // borrow the upload error response.
+  it('returns 500 when persisting the uploaded logo fails', async () => {
+    uploadLogoMock.mockResolvedValueOnce({ logoUrl: 'https://cdn.example.com/logo.png' });
+    updateBusinessMock.mockRejectedValueOnce(new Error('audit insert failed'));
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
+
+      const res = await request(app)
+        .post('/api/business/logo')
+        .set('x-business-id', 'biz-target')
+        .attach('image', pngBuffer, 'logo.png');
+
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({
+        error: 'INTERNAL_ERROR',
+        message: 'The server could not complete the request.',
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   // covers AC-3: multer enforces 5MB file size limit
   it('returns 400 when file exceeds the 5MB size limit', async () => {
     // Create a buffer just over 5MB — but with valid PNG header so it passes magic bytes
@@ -1105,5 +1196,106 @@ describe('Business Controller - POST /logo', () => {
     // Without a multer error handler, Express returns a 500.
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(uploadLogoMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('Business Controller - Missing audit actor', () => {
+  const appWithoutActor = express();
+  appWithoutActor.use(express.json());
+  appWithoutActor.use('/api/business', (req, _res, next) => {
+    req.user = {
+      userId: '   ',
+      memberships: [{ businessId: 'biz-target', role: 'OWNER' }],
+    };
+    next();
+  });
+  appWithoutActor.use('/api/business', businessRouter);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getBusinessMock.mockReset();
+    updateBusinessMock.mockReset();
+    completeOnboardingMock.mockReset();
+    uploadLogoMock.mockReset();
+    getBusinessMock.mockResolvedValue({
+      id: 'biz-target',
+      name: 'Existing Biz',
+      currency: 'BDT',
+      timezone: 'Asia/Dhaka',
+      onboardingComplete: true,
+    });
+  });
+
+  it('rejects PUT /me with 401 when no authenticated user id is available for audit', async () => {
+    const res = await request(appWithoutActor)
+      .put('/api/business/me')
+      .set('x-business-id', 'biz-target')
+      .send({ name: 'Should Not Save' });
+
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({
+      error: 'Authentication required',
+      message: 'Authentication required',
+    });
+    expect(updateBusinessMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects PUT /onboarding with 401 when no authenticated user id is available for audit', async () => {
+    completeOnboardingMock.mockRejectedValueOnce(
+      new ConflictError('Onboarding is already complete'),
+    );
+
+    const res = await request(appWithoutActor)
+      .put('/api/business/onboarding')
+      .set('x-business-id', 'biz-target')
+      .send({
+        name: 'Should Not Complete',
+        currency: 'USD',
+        timezone: 'Asia/Dhaka',
+        address: { street: '1 St', city: 'Dhaka', country: 'Bangladesh' },
+      });
+
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({
+      error: 'Authentication required',
+      message: 'Authentication required',
+    });
+    expect(completeOnboardingMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects POST /logo with 401 before uploading when no authenticated user id is available', async () => {
+    const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
+
+    const res = await request(appWithoutActor)
+      .post('/api/business/logo')
+      .set('x-business-id', 'biz-target')
+      .attach('image', pngBuffer, 'logo.png');
+
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({
+      error: 'Authentication required',
+      message: 'Authentication required',
+    });
+    expect(uploadLogoMock).not.toHaveBeenCalled();
+    expect(updateBusinessMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects PUT /me with 401 when the requestContext fallback user id is blank', async () => {
+    vi.mocked(requestContext.getStore).mockReturnValueOnce({
+      businessId: 'biz-target',
+      userId: '   ',
+    });
+
+    const res = await request(appWithoutActor)
+      .put('/api/business/me')
+      .set('x-business-id', 'biz-target')
+      .send({ name: 'Should Not Save' });
+
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({
+      error: 'Authentication required',
+      message: 'Authentication required',
+    });
+    expect(updateBusinessMock).not.toHaveBeenCalled();
   });
 });

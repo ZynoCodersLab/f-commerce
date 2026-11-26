@@ -1,10 +1,20 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThemeBoundary } from '@/components/theme/theme';
 import { setAuth } from '@/lib/auth-client';
 import { AppShell } from './shell';
+
+// jsdom does not load globals.css, so mirror the app logo rules that decide
+// which image is visible. Keep these selectors in sync with globals.css.
+const appLogoStyles = document.createElement('style');
+appLogoStyles.textContent = `
+  .app-logo-dark { display: none; }
+  :root[data-theme='dark'] .app-logo-light { display: none; }
+  :root[data-theme='dark'] .app-logo-dark { display: block; }
+`;
+document.head.append(appLogoStyles);
 
 // The shell only reads settings; the provider has its own suite.
 const { nav, replaceMock, settings } = vi.hoisted(() => ({
@@ -60,14 +70,74 @@ describe('AppShell business day', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows the app logo beside the product name in the sidebar and mobile header', () => {
+  it('shows the light app logo in light mode beside the product name in the sidebar and mobile header', () => {
     const { container } = renderShell();
     const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
 
     expect(within(sidebar).getByText('F Commerce')).toBeVisible();
     expect(within(sidebar).getByText('Order Desk')).toBeVisible();
-    expect(sidebar.querySelector('img[src="/logo.png"]')).not.toBeNull();
-    expect(container.querySelectorAll('img[src="/logo.png"]')).toHaveLength(2);
+
+    const lightLogos = Array.from(container.querySelectorAll('img[src="/logo-light.png"]'));
+    const darkLogos = Array.from(container.querySelectorAll('img[src="/logo-dark.png"]'));
+    expect(lightLogos).toHaveLength(2);
+    expect(darkLogos).toHaveLength(2);
+    expect(sidebar.querySelector('img[src="/logo-light.png"]')).toBeVisible();
+    expect(sidebar.querySelector('img[src="/logo-dark.png"]')).not.toBeVisible();
+    for (const logo of lightLogos) expect(logo).toBeVisible();
+    for (const logo of darkLogos) expect(logo).not.toBeVisible();
+  });
+
+  it('switches the app logo to logo-dark in dark mode and back to logo-light in light mode', async () => {
+    const user = userEvent.setup();
+    const { container } = renderShell();
+    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
+
+    await user.click(within(sidebar).getByRole('button', { name: 'Use dark theme' }));
+
+    for (const logo of container.querySelectorAll('img[src="/logo-dark.png"]')) {
+      expect(logo).toBeVisible();
+    }
+    for (const logo of container.querySelectorAll('img[src="/logo-light.png"]')) {
+      expect(logo).not.toBeVisible();
+    }
+
+    await user.click(within(sidebar).getByRole('button', { name: 'Use light theme' }));
+
+    for (const logo of container.querySelectorAll('img[src="/logo-light.png"]')) {
+      expect(logo).toBeVisible();
+    }
+    for (const logo of container.querySelectorAll('img[src="/logo-dark.png"]')) {
+      expect(logo).not.toBeVisible();
+    }
+  });
+
+  it('uses logo-dark when the system color scheme changes to dark without a stored override', async () => {
+    let matches = false;
+    const listeners = new Set<() => void>();
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn().mockImplementation(() => ({
+        get matches() {
+          return matches;
+        },
+        addEventListener: (_event: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_event: string, listener: () => void) => listeners.delete(listener),
+      })),
+    );
+
+    const { container } = renderShell();
+    expect(container.querySelector('img[src="/logo-light.png"]')).toBeVisible();
+    expect(container.querySelector('img[src="/logo-dark.png"]')).not.toBeVisible();
+
+    matches = true;
+    act(() => {
+      for (const listener of listeners) listener();
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('img[src="/logo-dark.png"]')).toBeVisible();
+      expect(container.querySelector('img[src="/logo-light.png"]')).not.toBeVisible();
+    });
   });
 
   it('shows the uploaded business logo beside the business name', () => {

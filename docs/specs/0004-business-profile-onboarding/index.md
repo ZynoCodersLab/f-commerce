@@ -192,7 +192,7 @@ Tracer Bullet ordering: data model migration first, then API surface, then the g
 
 - [x] Add image MIME type and size validation before the Cloudinary upload reaches the service. Implemented with a magic byte check in `backend/src/presentation/controllers/business.controller.ts`, verified 2026-10-01.
 - Consider Cloudinary unsigned upload presets to reduce backend upload load (requires verifying the security model for untrusted uploads)
-- Add an audit log entry for business profile changes (onboarding complete, profile updates)
+- [x] Add an audit log entry for business profile changes (onboarding complete, profile updates). Done 2026-11-20 via `BusinessAuditAction` rows written atomically in `DrizzleBusinessRepository`.
 
 ## References
 

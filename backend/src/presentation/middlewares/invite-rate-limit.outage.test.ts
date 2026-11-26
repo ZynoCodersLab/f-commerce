@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Options } from 'express-rate-limit';
 import type { Redis } from 'ioredis';
-import { createRateLimitRedisClient, RedisRateLimitStore } from './invite-rate-limit.middleware.js';
+import { createRateLimitRedisClient, RedisRateLimitStore } from './redis-rate-limit-store.js';
 
 // The limiter must fail open without waiting for ioredis to reconnect. A
 // queued command used to wait through the growing reconnect backoff, which

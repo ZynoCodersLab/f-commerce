@@ -8,14 +8,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Redis } from 'ioredis';
 
 import { config } from '../../infrastructure/config.js';
+import { RedisRateLimitStore, closeRateLimitStore } from './redis-rate-limit-store.js';
 import {
-  RedisRateLimitStore,
-  closeRateLimitStore,
   inviteAcceptRateLimiter,
   inviteAcceptTokenRateLimiter,
   invitePreviewRateLimiter,
   invitePreviewTokenRateLimiter,
   inviteWriteRateLimiter,
+  teamMutationRateLimiter,
 } from './invite-rate-limit.middleware.js';
 
 // Covers AC-24: the three invitation limits share one counter across API
@@ -47,6 +47,7 @@ function buildApp(): Server {
     res.status(200).json({ ok: true }),
   );
   app.post('/write', inviteWriteRateLimiter, (_req, res) => res.status(200).json({ ok: true }));
+  app.post('/mutate', teamMutationRateLimiter, (_req, res) => res.status(200).json({ ok: true }));
   app.get('/preview', invitePreviewRateLimiter, (_req, res) => res.status(200).json({ ok: true }));
   app.get('/preview/:token', invitePreviewTokenRateLimiter, invitePreviewRateLimiter, (_req, res) =>
     res.status(200).json({ ok: true }),
@@ -120,6 +121,28 @@ describe('invite write rate limiter', () => {
 
     const otherOwner = await request(second).post('/write').set('x-user-id', 'owner-b');
     expect(otherOwner.status).toBe(200);
+  });
+});
+
+describe('team mutation rate limiter', () => {
+  it('caps one owner at thirty team mutations per fifteen minutes across instances without consuming invite writes', async () => {
+    if (!redisUp) return;
+
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const server = attempt % 2 === 0 ? first : second;
+      const response = await request(server).post('/mutate').set('x-user-id', 'owner-a');
+      expect(response.status).toBe(200);
+    }
+
+    const blocked = await request(second).post('/mutate').set('x-user-id', 'owner-a');
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error).toBe('RATE_LIMITED');
+
+    const otherOwner = await request(second).post('/mutate').set('x-user-id', 'owner-b');
+    expect(otherOwner.status).toBe(200);
+
+    const inviteStillAllowed = await request(second).post('/write').set('x-user-id', 'owner-a');
+    expect(inviteStillAllowed.status).toBe(200);
   });
 });
 

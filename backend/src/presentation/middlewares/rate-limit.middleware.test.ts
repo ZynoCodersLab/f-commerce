@@ -1,8 +1,12 @@
 import type { Server } from 'node:http';
 import express from 'express';
+import { Redis } from 'ioredis';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { config } from '../../infrastructure/config.js';
+import { closeRateLimitStore, getRateLimitRedisClient } from './redis-rate-limit-store.js';
+import { clearGeneralRateLimitKeys } from './rate-limit.test-helpers.js';
 import {
   globalRateLimiter,
   loginAccountRateLimiter,
@@ -12,6 +16,8 @@ import {
 } from './rate-limit.middleware.js';
 
 let server: Server;
+let redis: Redis | null = null;
+let redisUp = false;
 
 /** TEST-NET-3 addresses keep each test's limiter keys isolated. */
 let nextIp = 1;
@@ -21,7 +27,23 @@ function uniqueIp(): string {
   return ip;
 }
 
-beforeAll(() => {
+beforeAll(async () => {
+  redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: 1, connectTimeout: 1_000 });
+  redis.on('error', () => {
+    // Offline runs exercise the in process fallback; silence connection errors.
+  });
+  redisUp = await redis
+    .ping()
+    .then(() => true)
+    .catch(() => false);
+  if (redisUp) {
+    const sharedClient = getRateLimitRedisClient();
+    if (sharedClient.status !== 'ready') {
+      await new Promise<void>((resolve) => sharedClient.once('ready', () => resolve()));
+    }
+    if (redis) await clearGeneralRateLimitKeys(redis);
+  }
+
   const app = express();
   app.set('trust proxy', 1);
   app.use(express.json());
@@ -62,7 +84,14 @@ beforeAll(() => {
   server = app.listen(0);
 });
 
+beforeEach(async () => {
+  if (redis && redisUp) await clearGeneralRateLimitKeys(redis);
+});
+
 afterAll(async () => {
+  if (redis && redisUp) await clearGeneralRateLimitKeys(redis);
+  redis?.disconnect();
+  await closeRateLimitStore();
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });

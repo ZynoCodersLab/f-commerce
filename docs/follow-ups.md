@@ -11,9 +11,14 @@ Last reviewed: 2026-11-19.
 
 ## P0: before the next feature
 
-- [ ] **Rate-limit team member mutations.** `PATCH /api/team/members/:id` and
-      `DELETE /api/team/members/:id` have no limiter. Cancel-invite (`DELETE /api/team/invitations/:id`)
-      has none either. Effort: S. Source: `docs/scope/scope.md:347`, `backend/src/presentation/controllers/team.controller.ts:229`.
+- [x] **Rate-limit team member mutations.** Done 2026-11-21. Added `teamMutationRateLimiter`
+      (`team-mutation`, 30 requests per 15 minutes per owner on the shared Redis store with
+      in-process fail-open fallback) after `requireBusinessRole(OWNER_ONLY)` on
+      `DELETE /api/team/invitations/:id`, `PATCH /api/team/members/:id`, and
+      `DELETE /api/team/members/:id`, kept separate from `inviteWriteRateLimiter`. Surfaced
+      `RATE_LIMITED` feedback in `frontend/src/app/settings/team/page.tsx` and locked with route
+      and Redis cross-instance tests. Source: `docs/scope/scope.md:347`,
+      `backend/src/presentation/controllers/team.controller.ts:215-265`.
 
 - [x] **Clean the stale follow-up ledger.** Done 2026-11-19.
   - [x] Tick spec 0005 "Row 9: orders must reject archived customers"; closed by spec 0007 AC-13.
@@ -30,53 +35,60 @@ Last reviewed: 2026-11-19.
   - [x] Remove the "Follow-ups moved from `nextTask.txt`" phrasing in `docs/scope/scope.md:348`;
         `nextTask.txt` no longer exists. Keep the disposable-email item itself.
 
-- [ ] **Fix the undefined ESLint rules in the frontend config.** Found 2026-11-19 while re-verifying
-      spec 0004: `npx eslint frontend` reports 3 errors, not 0. `react-hooks/set-state-in-effect`
-      is undefined in `frontend/src/app/invite/[token]/page.tsx:133` and
-      `frontend/src/app/settings/team/page.tsx:153`, and `react-hooks/exhaustive-deps` is undefined in
-      `frontend/src/app/onboarding/page.tsx:248`. Nothing resolves those configured rules, so lint
-      fails on a fresh checkout. Effort: S. Source:
+- [x] **Fix the undefined ESLint rules in the frontend config.** Done 2026-11-20. Running
+      `npx eslint frontend` from the repository root loaded the root `eslint.config.mjs` instead of
+      `frontend/eslint.config.mjs`, so `react-hooks` rules were missing for `frontend/**`. Root
+      `eslint.config.mjs` now delegates `frontend` via `basePath: 'frontend'` with `next.rootDir`
+      set, and the redundant manual `eslint-plugin-react-hooks` require in
+      `frontend/eslint.config.mjs` was removed (`eslint-config-next/core-web-vitals` already
+      registers it). Locked with `frontend/eslint.config.test.ts`. Source:
       `docs/specs/0004-business-profile-onboarding/verify.md:41`.
 
-- [ ] **Repo hygiene.**
+- [x] **Repo hygiene.** Done 2026-11-21.
   - [x] Delete the tracked root scratch images `test-png.png`, `test-spoof.png`, and `test-valid.png`.
         Removed 2026-11-19.
   - [x] Remove the stale worktree for the already-merged `feat/next-security-upgrade` branch:
         `/home/devziaus/.local/share/opencode/worktree/f5e976/next-upgrade-security`. Removed 2026-11-19
         with `git worktree remove`; the branch itself is kept.
-  - [ ] Close the 2026-11-15 review nits (four separate items below). Source:
+  - [x] Close the 2026-11-15 review nits (four separate items below). Done 2026-11-21. Source:
         `docs/reviews/2026-11-15-feat-team-staff-invites.md`, section "Nits".
-  - [ ] Hardcoded `'send-invitation'` job name in `backend/src/infrastructure/queue/invite-queue.ts:71`.
-        `active.add()` takes the literal while the queue name is already an exported constant. Add an
-        `INVITE_JOB_NAME` constant and use it here. Cosmetic only: deduplication uses `jobId`
-        (`invite-${invitationId}-${tokenHash}`).
-  - [ ] Duplicate email schema. `auth.ts` defines its own `EmailSchema` with the same pipeline as
-        `TeamEmailSchema` in `team.ts`. The review judged it harmless and out of scope for a fix, so
-        decide: share one schema, or add a comment documenting the duplication. Don't leave it open.
-  - [ ] `frontend/src/lib/auth-guard.ts:61-62` (the `auth-guard.ts` nit). Add a comment that
-        `redirectAuthenticated` is intentionally ignored when `requireAuth: false`, so the formula
-        does not read like unnoticed dead logic. The review cited `:58`; the formula is at `:61-62`.
-  - [ ] Redundant re-throw in `backend/src/application/services/invite-worker.ts`. Confirm against
-        the retry path, then drop it if it is unreachable.
+  - [x] Hardcoded `'send-invitation'` job name in `backend/src/infrastructure/queue/invite-queue.ts:71`.
+        Done 2026-11-21. Exported `INVITE_JOB_NAME = 'send-invitation'` alongside
+        `INVITE_QUEUE_NAME`, used it in `active.add()`, and locked it in `invite-queue.test.ts`.
+  - [x] Duplicate email schema. Done 2026-11-21. Extracted a shared `EmailSchema` in
+        `packages/contracts/src/email.ts` (re-exported from `packages/contracts/src/index.ts`),
+        reused it in `auth.ts`, aliased `TeamEmailSchema = EmailSchema` in `team.ts`, and locked
+        the shared schema in `packages/contracts/src/email.test.ts`.
+  - [x] `frontend/src/lib/auth-guard.ts:61-62` (the `auth-guard.ts` nit). Done 2026-11-21. Added a
+        comment above `shouldRedirect` explaining the actual behavior: `redirectAuthenticated` is
+        ignored when `requireAuth: true`, and setting both `requireAuth: false` and
+        `redirectAuthenticated: false` intentionally collapses `shouldRedirect` to `false` while
+        still waiting for client hydration.
+  - [x] Redundant re-throw in `backend/src/application/services/invite-worker.ts`. Done 2026-11-21.
+        Confirmed against `worker.ts` and BullMQ's `shouldRetryJob` (`attemptsMade + 1 < attempts`):
+        the re-throw is reachable and required on earlier attempts to trigger retries, and on the
+        final attempt BullMQ does not schedule an extra retry and instead fires `worker.on('failed')`
+        so the crash is logged rather than swallowed. Kept the re-throw and documented why.
 
-- [ ] **Decide STAFF customer-notes visibility.** The spec default is yes but still asks for
-      confirmation. Answer it and close the item. Source: `docs/specs/0005-customers/index.md:202`.
+- [x] **Decide STAFF customer-notes visibility.** Done 2026-11-21. Confirmed: `STAFF` can see and edit
+      customer notes, matching the shipped API and UI behavior. Source:
+      `docs/specs/0005-customers/index.md:202`.
 
 ## P1: before the next feature if there is time
 
-- [ ] **Add business profile audit rows.** Onboarding, profile updates, logo changes, and timezone
-      changes currently write no audit entry. Effort: M. Source:
-      `docs/specs/0004-business-profile-onboarding/index.md:191`,
+- [x] **Add business profile audit rows.** Done 2026-11-20. Onboarding completion, profile updates,
+      logo changes, and timezone changes now write `audit_logs` rows atomically in the same
+      PostgreSQL transaction (`BUSINESS_ONBOARDING_COMPLETED`, `BUSINESS_PROFILE_UPDATED`,
+      `BUSINESS_LOGO_UPDATED`, `BUSINESS_TIMEZONE_CHANGED`) with before and after JSON snapshots.
+      Source: `docs/specs/0004-business-profile-onboarding/index.md:191`,
       `docs/specs/0008-business-timezone/index.md:166`.
 
-- [ ] **Use a shared Redis store for the general rate limiters.** The global, login, registration,
-      refresh, and upload limiters still use `express-rate-limit`'s in-memory store. Only the invite
-      limiters are Redis-backed. Required before running more than one API instance. Effort: S-M.
-      Source: `docs/specs/0001-stack-and-architecture.md:143`.
-
-- [ ] **Add CI path filters.** Every pull request currently runs the full backend, Redis, worker,
-      Playwright, and build pipeline. Effort: S-M. Source:
-      `docs/specs/0001-stack-and-architecture.md:183`.
+- [x] **Use a shared Redis store for the general rate limiters.** Done 2026-11-21. Extracted the
+      shared `RedisRateLimitStore` and single multiplexed Redis client into
+      `backend/src/presentation/middlewares/redis-rate-limit-store.ts` and wired all six general
+      limiters (`global`, `login-ip`, `login-account`, `register`, `refresh`, `upload`) to it with
+      in process fail open fallback and `/health` skipping before touching Redis. Source:
+      `docs/specs/0001-stack-and-architecture.md:143`.
 
 ## P2: production readiness, not feature blockers
 
@@ -109,6 +121,9 @@ Last reviewed: 2026-11-19.
 - [ ] Collapse the duplicate business profile fetch when the business switcher lands.
 - [ ] Consider Cloudinary unsigned upload presets if backend upload load matters.
 - [ ] Remove the legacy `Unknown customer` rows once the old test data is disposable.
+- [ ] Add CI path filters if full-pipeline PR runs become slow or costly (deferred from P1 on
+      2026-11-21). Every pull request currently runs the full backend, Redis, worker, Playwright,
+      and build pipeline. Effort: S-M. Source: `docs/specs/0001-stack-and-architecture.md:183`.
 
 ## Source documents
 

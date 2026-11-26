@@ -142,7 +142,7 @@ The backend applies `helmet()` globally, so every response carries the standard 
 
 Two follow-ups are required before the backend runs as more than one instance or relies on per-IP limits for security:
 
-- **Shared limiter store**: the limiters use `express-rate-limit`'s in-memory store. Counters are per process, reset on restart, and are not shared across instances, so every instance enforces its own quota. When the backend scales beyond one process, or when BullMQ and Redis land, replace the store with a Redis-backed store using the existing `REDIS_URL` contract so the limits are global.
+- [x] **Shared limiter store** (Done 2026-11-21): all general limiters and team invitation limiters share the Redis-backed `RedisRateLimitStore` over `REDIS_URL` with an in-process fail-open fallback when Redis is unreachable.
 - **Trustworthy client IP**: per-IP keys come from `req.ip` with one trusted proxy hop (`trust proxy = 1`). The host/Next proxy must overwrite `X-Forwarded-For`; a custom client can otherwise supply the header and spoof the key. The per-account login limit and per-user upload limit key on verified data and are not affected. Configure the edge proxy to overwrite the header, or terminate at a trusted proxy that does, before treating per-IP limits as a security boundary. Add another proxy hop only when a CDN or load balancer actually fronts the host, and raise `trust proxy` at the same time.
 
 **CI boundaries**:

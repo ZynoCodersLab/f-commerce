@@ -11,9 +11,27 @@ import {
   BusinessProfileUpdateSchema,
   DraftSaveSchema,
 } from '@f-commerce/contracts';
-import { NotFoundError } from '../../domain/errors.js';
-import { getTenantId, runWithContext } from '../../infrastructure/database/drizzle/context.js';
+import { ConflictError, NotFoundError } from '../../domain/errors.js';
+import {
+  getTenantId,
+  requestContext,
+  runWithContext,
+} from '../../infrastructure/database/drizzle/context.js';
 import { sendInternalError } from './internal-error.js';
+
+function getActorUserId(req: Request): string | undefined {
+  const user = req.user as { userId?: unknown } | undefined;
+  if (typeof user?.userId === 'string') {
+    const trimmed = user.userId.trim();
+    if (trimmed !== '') return trimmed;
+  }
+  const contextUserId = requestContext?.getStore?.()?.userId;
+  if (typeof contextUserId === 'string') {
+    const trimmed = contextUserId.trim();
+    if (trimmed !== '') return trimmed;
+  }
+  return undefined;
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -181,7 +199,15 @@ businessRouter.put('/me', requireBusinessRole(['OWNER']), async (req: Request, r
       return;
     }
 
-    const business = await businessService.updateBusiness(businessId, parsed.data);
+    const actorUserId = getActorUserId(req);
+    if (!actorUserId) {
+      res
+        .status(401)
+        .json({ error: 'Authentication required', message: 'Authentication required' });
+      return;
+    }
+
+    const business = await businessService.updateBusiness(businessId, parsed.data, actorUserId);
     if (!business) {
       res.status(404).json({ error: 'Business not found', message: 'Business not found' });
       return;
@@ -214,47 +240,67 @@ businessRouter.post(
   uploadRateLimiter,
   upload.single('image'),
   async (req: Request, res: Response) => {
-    try {
-      if (!req.file) {
-        res.status(400).json({ error: 'No file uploaded', message: 'Please upload an image file' });
-        return;
-      }
+    if (!req.file) {
+      res.status(400).json({ error: 'No file uploaded', message: 'Please upload an image file' });
+      return;
+    }
 
-      const maxSize = 5 * 1024 * 1024;
-      if (req.file.size > maxSize) {
-        res.status(400).json({ error: 'File too large', message: 'Maximum file size is 5MB' });
-        return;
-      }
+    const maxSize = 5 * 1024 * 1024;
+    if (req.file.size > maxSize) {
+      res.status(400).json({ error: 'File too large', message: 'Maximum file size is 5MB' });
+      return;
+    }
 
-      // Validate file by magic bytes (MIME type from header is attacker-controlled)
-      const detectedType = detectImageType(req.file.buffer);
-      if (!detectedType) {
-        res.status(400).json({
-          error: 'Invalid file type',
-          message: 'Only JPEG, PNG, GIF, and WebP images are allowed',
-        });
-        return;
-      }
-
-      // Use tenant context businessId set by requireBusinessRole middleware
-      const businessId = getTenantId();
-      if (!businessId) {
-        res.status(400).json({ error: 'No business context', message: 'Missing business context' });
-        return;
-      }
-
-      const result = await businessService.uploadLogo(businessId, req.file.buffer);
-      // Persist the logo URL to the business so it's available during onboarding
-      await businessService.updateBusiness(businessId, { logoUrl: result.logoUrl });
-      res.status(200).json({
-        success: true,
-        data: { logoUrl: result.logoUrl },
-        message: 'Logo uploaded successfully',
+    // Validate file by magic bytes (MIME type from header is attacker-controlled)
+    const detectedType = detectImageType(req.file.buffer);
+    if (!detectedType) {
+      res.status(400).json({
+        error: 'Invalid file type',
+        message: 'Only JPEG, PNG, GIF, and WebP images are allowed',
       });
+      return;
+    }
+
+    // Use tenant context businessId set by requireBusinessRole middleware
+    const businessId = getTenantId();
+    if (!businessId) {
+      res.status(400).json({ error: 'No business context', message: 'Missing business context' });
+      return;
+    }
+
+    const actorUserId = getActorUserId(req);
+    if (!actorUserId) {
+      res
+        .status(401)
+        .json({ error: 'Authentication required', message: 'Authentication required' });
+      return;
+    }
+
+    // Only the Cloudinary call maps to a 502. A persistence or audit failure is
+    // a server error, so it goes to the global handler instead of claiming the
+    // upload failed.
+    let logoUrl: string;
+    try {
+      const result = await businessService.uploadLogo(businessId, req.file.buffer);
+      logoUrl = result.logoUrl;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       res.status(502).json({ error: 'Cloudinary upload failed', message });
+      return;
     }
+
+    // Persist the logo URL to the business so it's available during onboarding
+    const updated = await businessService.updateBusiness(businessId, { logoUrl }, actorUserId);
+    if (!updated) {
+      res.status(404).json({ error: 'Business not found', message: 'Business not found' });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: { logoUrl },
+      message: 'Logo uploaded successfully',
+    });
   },
 );
 
@@ -276,14 +322,26 @@ businessRouter.put(
         return;
       }
 
+      const actorUserId = getActorUserId(req);
+      if (!actorUserId) {
+        res
+          .status(401)
+          .json({ error: 'Authentication required', message: 'Authentication required' });
+        return;
+      }
+
       const { name, currency, timezone, address, logoUrl } = parsed.data;
-      const business = await businessService.completeOnboarding(businessId, {
-        name,
-        currency,
-        timezone,
-        address,
-        logoUrl,
-      });
+      const business = await businessService.completeOnboarding(
+        businessId,
+        {
+          name,
+          currency,
+          timezone,
+          address,
+          logoUrl,
+        },
+        actorUserId,
+      );
 
       if (!business) {
         res.status(404).json({ error: 'Business not found', message: 'Business not found' });
@@ -305,6 +363,8 @@ businessRouter.put(
     } catch (error) {
       if (error instanceof NotFoundError) {
         res.status(404).json({ error: error.message });
+      } else if (error instanceof ConflictError) {
+        res.status(409).json({ error: 'ONBOARDING_COMPLETE', message: error.message });
       } else {
         sendInternalError(res, error);
       }

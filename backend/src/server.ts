@@ -17,7 +17,7 @@ import { productRouter } from './presentation/controllers/product.controller.js'
 import { invitationRouter, teamRouter } from './presentation/controllers/team.controller.js';
 import { closeInviteQueue } from './infrastructure/queue/invite-queue.js';
 import { handleUnhandledError } from './presentation/middlewares/error-handler.middleware.js';
-import { closeRateLimitStore } from './presentation/middlewares/invite-rate-limit.middleware.js';
+import { closeRateLimitStore } from './presentation/middlewares/redis-rate-limit-store.js';
 import {
   globalRateLimiter,
   loginAccountRateLimiter,

@@ -1,8 +1,13 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { DM_Sans, IBM_Plex_Mono } from 'next/font/google';
 import { ThemeBoundary } from '@/components/theme/theme';
+import { themeScript } from '@/components/theme/theme-script';
 import { BusinessSettingsProvider } from '@/components/business/business-settings-provider';
 import './globals.css';
+
+export const viewport: Viewport = {
+  colorScheme: 'light dark',
+};
 
 const dmSans = DM_Sans({
   variable: '--font-dm-sans',
@@ -36,10 +41,14 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html
       lang="en"
+      data-theme="light"
       data-scroll-behavior="smooth"
       className={`${dmSans.variable} ${plexMono.variable}`}
       suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       {/* Grammarly and similar extensions add attributes to body before React hydrates. */}
       <body suppressHydrationWarning>
         <ThemeBoundary>
