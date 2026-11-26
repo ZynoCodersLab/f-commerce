@@ -8,9 +8,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Redis } from 'ioredis';
 
 import { config } from '../../infrastructure/config.js';
+import { RedisRateLimitStore, closeRateLimitStore } from './redis-rate-limit-store.js';
 import {
-  RedisRateLimitStore,
-  closeRateLimitStore,
   inviteAcceptRateLimiter,
   inviteAcceptTokenRateLimiter,
   invitePreviewRateLimiter,

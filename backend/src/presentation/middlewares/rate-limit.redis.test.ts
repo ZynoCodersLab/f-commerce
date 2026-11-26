@@ -8,6 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { config } from '../../infrastructure/config.js';
 import { closeRateLimitStore, getRateLimitRedisClient } from './redis-rate-limit-store.js';
+import { clearGeneralRateLimitKeys } from './rate-limit.test-helpers.js';
 import {
   globalRateLimiter,
   loginAccountRateLimiter,
@@ -16,15 +17,6 @@ import {
   registerRateLimiter,
   uploadRateLimiter,
 } from './rate-limit.middleware.js';
-
-const GENERAL_PREFIXES = [
-  'ratelimit:global:*',
-  'ratelimit:login-ip:*',
-  'ratelimit:login-account:*',
-  'ratelimit:register:*',
-  'ratelimit:refresh:*',
-  'ratelimit:upload:*',
-];
 
 let redis: Redis;
 let first: Server;
@@ -59,17 +51,6 @@ function buildApp(): Server {
   return app.listen(0);
 }
 
-async function clearGeneralPrefixes(): Promise<void> {
-  for (const pattern of GENERAL_PREFIXES) {
-    let cursor = '0';
-    do {
-      const [next, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
-      cursor = next;
-      if (keys.length > 0) await redis.del(...keys);
-    } while (cursor !== '0');
-  }
-}
-
 function hashedKey(prefix: string, rawKey: string): string {
   return `ratelimit:${prefix}:${createHash('sha256').update(rawKey).digest('hex')}`;
 }
@@ -98,11 +79,11 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  if (redisUp) await clearGeneralPrefixes();
+  if (redisUp) await clearGeneralRateLimitKeys(redis);
 });
 
 afterAll(async () => {
-  if (redisUp) await clearGeneralPrefixes();
+  if (redisUp) await clearGeneralRateLimitKeys(redis);
   redis?.disconnect();
   await closeRateLimitStore();
   await new Promise<void>((resolve) => (first ? first.close(() => resolve()) : resolve()));

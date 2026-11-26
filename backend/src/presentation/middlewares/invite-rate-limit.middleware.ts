@@ -2,14 +2,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import type { Options } from 'express-rate-limit';
 import type { Request, Response, RequestHandler } from 'express';
 import { config } from '../../infrastructure/config.js';
-import {
-  RedisRateLimitStore,
-  closeRateLimitStore,
-  createRateLimitRedisClient,
-  getRateLimitRedisClient,
-} from './redis-rate-limit-store.js';
-
-export { RedisRateLimitStore, closeRateLimitStore, createRateLimitRedisClient };
+import { RedisRateLimitStore, getRateLimitRedisClient } from './redis-rate-limit-store.js';
 
 /**
  * The check runs per request, but the config object is frozen at import time, so

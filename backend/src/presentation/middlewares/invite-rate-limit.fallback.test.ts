@@ -3,7 +3,7 @@ import type { Options } from 'express-rate-limit';
 import type { Redis } from 'ioredis';
 import { createHash } from 'node:crypto';
 import { MemoryFallbackStore } from './memory-fallback-store.js';
-import { RedisRateLimitStore } from './invite-rate-limit.middleware.js';
+import { RedisRateLimitStore } from './redis-rate-limit-store.js';
 
 // The token limiters hand a raw bearer secret to the store as the key. When
 // Redis is down the store falls back to an in-process map, which must hold the

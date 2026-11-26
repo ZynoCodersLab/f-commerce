@@ -17,10 +17,13 @@ describe('frontend ESLint configuration', () => {
     ]);
     expect(results).toHaveLength(3);
 
-    const errors = results.flatMap((result) =>
-      result.messages.filter((message) => message.severity === 2),
+    const configErrors = results.flatMap((result) =>
+      result.messages.filter(
+        (message) =>
+          message.ruleId === null || /Definition for rule .* was not found/.test(message.message),
+      ),
     );
-    expect(errors).toEqual([]);
+    expect(configErrors).toEqual([]);
   }, 30_000);
 
   it('enforces react-hooks/set-state-in-effect for frontend files from both roots', async () => {

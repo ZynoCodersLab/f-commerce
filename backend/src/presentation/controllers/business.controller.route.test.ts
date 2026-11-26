@@ -1241,6 +1241,10 @@ describe('Business Controller - Missing audit actor', () => {
   });
 
   it('rejects PUT /onboarding with 401 when no authenticated user id is available for audit', async () => {
+    completeOnboardingMock.mockRejectedValueOnce(
+      new ConflictError('Onboarding is already complete'),
+    );
+
     const res = await request(appWithoutActor)
       .put('/api/business/onboarding')
       .set('x-business-id', 'biz-target')

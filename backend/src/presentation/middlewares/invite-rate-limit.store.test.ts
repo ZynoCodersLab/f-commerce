@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Redis } from 'ioredis';
 import type { Options } from 'express-rate-limit';
 
-import { RedisRateLimitStore, closeRateLimitStore } from './invite-rate-limit.middleware.js';
+import { RedisRateLimitStore, closeRateLimitStore } from './redis-rate-limit-store.js';
 
 /**
  * Guards the counter against the Redis 7 only `PEXPIRE ... NX` transaction.
