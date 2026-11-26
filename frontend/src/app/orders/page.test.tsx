@@ -25,7 +25,10 @@ function makeOrder(overrides: Partial<OrderSummaryDto> = {}): OrderSummaryDto {
     status: 'PENDING',
     customerName: 'Nusrat Jahan',
     total: 9350,
+    paidAmount: 0,
     dueAmount: 9350,
+    refundOwed: 0,
+    paymentStatus: 'UNPAID',
     source: 'FACEBOOK',
     deliveryDeadline: null,
     itemCount: 2,
@@ -369,5 +372,62 @@ describe('OrdersPage', () => {
     await user.click(screen.getByRole('button', { name: 'Try again' }));
 
     expect(await screen.findAllByRole('link', { name: 'ORD-0001' })).not.toHaveLength(0);
+  });
+
+  // covers AC-20: renders payment badges and filters by payment status chips combined with status and search.
+  it('renders payment badges and sends paymentStatus filters when chips are chosen', async () => {
+    const user = userEvent.setup();
+    const fetchMock = installedFetch((url) => {
+      if (url.startsWith('/api/orders?')) {
+        return jsonResponse(200, {
+          success: true,
+          data: {
+            items: [
+              makeOrder({
+                id: 'order-1',
+                orderNumber: 'ORD-0001',
+                paymentStatus: 'PARTIAL',
+                paidAmount: 3000,
+                dueAmount: 6350,
+              }),
+              makeOrder({
+                id: 'order-2',
+                orderNumber: 'ORD-0002',
+                status: 'CANCELLED',
+                paymentStatus: 'REFUND_OWED',
+                paidAmount: 2000,
+                dueAmount: 0,
+                refundOwed: 2000,
+              }),
+            ],
+            nextCursor: null,
+          },
+        });
+      }
+      return metadata(url);
+    });
+
+    renderPage();
+    await screen.findAllByRole('link', { name: 'ORD-0001' });
+
+    expect(screen.getAllByText('Partial').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Refund owed').length).toBeGreaterThan(0);
+
+    const paymentGroup = screen.getByRole('group', { name: 'Filter orders by payment status' });
+    await user.click(paymentGroup.querySelector('button:nth-of-type(2)') as HTMLButtonElement); // Has due
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes('paymentStatus=UNPAID%2CPARTIAL'),
+        ),
+      ).toBe(true);
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Refund owed' }));
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([input]) => String(input).includes('paymentStatus=REFUND_OWED')),
+      ).toBe(true);
+    });
   });
 });

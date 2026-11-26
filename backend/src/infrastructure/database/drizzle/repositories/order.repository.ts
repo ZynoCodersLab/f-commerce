@@ -4,20 +4,26 @@ import { getDb } from '../client.js';
 import { getTenantId } from '../context.js';
 import {
   auditLogs,
+  businesses,
   businessOrderCounters,
   customers,
   inventoryTransactions,
   orderItems,
   orders,
   orderStatusHistory,
+  payments,
   productVariants,
   products,
   users,
 } from '../schema.js';
+import { toPayment } from './payment.repository.js';
 import { isUuid } from '../../../../domain/uuid.js';
 import { Customer } from '../../../../domain/entities/customer.entity.js';
+import { PaymentKind } from '../../../../domain/entities/financial.entity.js';
 import { InventoryTransactionType } from '../../../../domain/entities/inventory.entity.js';
 import {
+  EDITABLE_ORDER_STATUSES,
+  ORDER_TRANSITIONS,
   Order,
   OrderDetail,
   OrderItem,
@@ -26,12 +32,23 @@ import {
   OrderSummary,
 } from '../../../../domain/entities/order.entity.js';
 import {
+  assertTotalCoversPaid,
+  isOrderClosedForPayment,
+} from '../../../../domain/order-payments.js';
+import {
+  InvalidStatusTransitionError,
+  NotFoundError,
+  OrderChangedError,
+  OrderLockedError,
+} from '../../../../domain/errors.js';
+import {
   IOrderRepository,
   OrderAuditEntry,
   OrderCatalogProduct,
   OrderCatalogVariant,
   OrderCreateData,
   OrderHistoryWrite,
+  OrderInitialPaymentWrite,
   OrderListQuery,
   OrderListResult,
   OrderPair,
@@ -123,6 +140,7 @@ function toSummary(row: {
   status: OrderStatus;
   customerNameSnapshot: string;
   total: number;
+  paidAmount: number;
   dueAmount: number;
   source: string | null;
   deliveryDeadline: string | null;
@@ -136,6 +154,7 @@ function toSummary(row: {
     status: row.status,
     customerNameSnapshot: row.customerNameSnapshot,
     total: row.total,
+    paidAmount: row.paidAmount,
     dueAmount: row.dueAmount,
     source: row.source ?? undefined,
     deliveryDeadline: row.deliveryDeadline ?? undefined,
@@ -212,6 +231,18 @@ export class DrizzleOrderRepository implements IOrderRepository {
       conditions.push(inArray(orders.status, query.statuses));
     }
 
+    if (query.paymentStatuses && query.paymentStatuses.length > 0) {
+      // Mirrors derivePaymentStatus() in domain/order-payments.ts one to one.
+      const derivedPaymentStatusSql = sql`CASE
+        WHEN ${orders.status} IN ('CANCELLED', 'RETURNED') THEN
+          CASE WHEN ${orders.paidAmount} > 0 THEN 'REFUND_OWED' ELSE 'NONE' END
+        WHEN ${orders.paidAmount} >= ${orders.total} THEN 'PAID'
+        WHEN ${orders.paidAmount} = 0 THEN 'UNPAID'
+        ELSE 'PARTIAL'
+      END`;
+      conditions.push(inArray(derivedPaymentStatusSql, query.paymentStatuses));
+    }
+
     if (query.q !== '') {
       const pattern = `%${escapeLike(query.q)}%`;
       const searchConditions: SQL[] = [
@@ -242,6 +273,7 @@ export class DrizzleOrderRepository implements IOrderRepository {
         status: orders.status,
         customerNameSnapshot: orders.customerNameSnapshot,
         total: orders.total,
+        paidAmount: orders.paidAmount,
         dueAmount: orders.dueAmount,
         source: orders.source,
         deliveryDeadline: orders.deliveryDeadline,
@@ -270,6 +302,7 @@ export class DrizzleOrderRepository implements IOrderRepository {
         status: orders.status,
         customerNameSnapshot: orders.customerNameSnapshot,
         total: orders.total,
+        paidAmount: orders.paidAmount,
         dueAmount: orders.dueAmount,
         source: orders.source,
         deliveryDeadline: orders.deliveryDeadline,
@@ -377,11 +410,22 @@ export class DrizzleOrderRepository implements IOrderRepository {
     return rows.length === 0 ? null : rows[0].name;
   }
 
+  async findBusinessPaymentSettings(): Promise<{ currency: string; timezone: string } | null> {
+    const businessId = getTenantId();
+    if (!businessId) return null;
+    const rows = await getDb()
+      .select({ currency: businesses.currency, timezone: businesses.timezone })
+      .from(businesses)
+      .where(eq(businesses.id, businessId));
+    return rows.length === 0 ? null : rows[0];
+  }
+
   async create(
     data: OrderCreateData,
     items: OrderWriteItem[],
     history: OrderHistoryWrite,
     audit: OrderAuditEntry,
+    initialPayment: OrderInitialPaymentWrite | null = null,
   ): Promise<OrderDetail> {
     const businessId = getTenantId();
     if (!businessId) throw new Error('No business context');
@@ -415,7 +459,7 @@ export class DrizzleOrderRepository implements IOrderRepository {
           deliveryFee: data.deliveryFee,
           discount: data.discount,
           total: data.total,
-          paidAmount: 0,
+          paidAmount: data.paidAmount,
           dueAmount: data.dueAmount,
           shippingAddress: data.shippingAddress,
           source: data.source,
@@ -458,10 +502,50 @@ export class DrizzleOrderRepository implements IOrderRepository {
         metadata: JSON.stringify({ orderNumber: order.orderNumber, total: order.total }),
       });
 
+      let insertedPayment: typeof payments.$inferSelect | null = null;
+      if (initialPayment !== null) {
+        const paymentRows = await tx
+          .insert(payments)
+          .values({
+            businessId,
+            orderId: order.id,
+            kind: PaymentKind.PAYMENT,
+            amount: initialPayment.amount,
+            method: initialPayment.method,
+            paymentDate: initialPayment.paymentDate,
+            referenceNumber: initialPayment.referenceNumber,
+            notes: initialPayment.notes,
+            recordedByUserId: initialPayment.recordedByUserId,
+            recordedByName: initialPayment.recordedByName,
+            // Order creation relies on orders.idempotency_key; leave payment key null.
+            idempotencyKey: null,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
+        insertedPayment = paymentRows[0];
+
+        await tx.insert(auditLogs).values({
+          businessId,
+          userId: audit.userId,
+          action: initialPayment.auditAction,
+          entityType: 'PAYMENT',
+          entityId: insertedPayment.id,
+          metadata: JSON.stringify({
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            kind: PaymentKind.PAYMENT,
+            amount: initialPayment.amount,
+            method: initialPayment.method,
+          }),
+        });
+      }
+
       return {
         order,
         items: insertedItems.map(toItem),
         history: [toHistory(historyRows[0])],
+        payments: insertedPayment ? [toPayment(insertedPayment)] : [],
       };
     });
   }
@@ -477,23 +561,40 @@ export class DrizzleOrderRepository implements IOrderRepository {
     if (!businessId || !isUuid(id)) return null;
 
     return await getDb().transaction(async (tx) => {
+      const lockedRows = await tx
+        .select()
+        .from(orders)
+        .where(and(eq(orders.id, id), eq(orders.businessId, businessId)))
+        .for('update');
+      if (lockedRows.length === 0) {
+        throw new NotFoundError('Order not found');
+      }
+      const lockedOrder = lockedRows[0];
+
+      if (!EDITABLE_ORDER_STATUSES.includes(lockedOrder.status)) {
+        throw new OrderLockedError();
+      }
+
+      const nextTotal = changes.total ?? lockedOrder.total;
+      assertTotalCoversPaid(nextTotal, lockedOrder.paidAmount);
+
+      if (lockedOrder.version !== expectedVersion) {
+        throw new OrderChangedError();
+      }
+
       const now = new Date();
       const setValues: Partial<typeof orders.$inferInsert> = {
         ...changes,
-        version: expectedVersion + 1,
+        // Always derive dueAmount from the locked paidAmount so concurrent payments never go stale.
+        dueAmount: nextTotal - lockedOrder.paidAmount,
+        version: lockedOrder.version + 1,
         updatedAt: now,
       };
 
       const updated = await tx
         .update(orders)
         .set(setValues)
-        .where(
-          and(
-            eq(orders.id, id),
-            eq(orders.businessId, businessId),
-            eq(orders.version, expectedVersion),
-          ),
-        )
+        .where(and(eq(orders.id, id), eq(orders.businessId, businessId)))
         .returning();
 
       if (updated.length === 0) return null;
@@ -572,18 +673,26 @@ export class DrizzleOrderRepository implements IOrderRepository {
         metadata: audit.metadata ?? null,
       });
 
-      const historyRows = await tx
-        .select()
-        .from(orderStatusHistory)
-        .where(
-          and(eq(orderStatusHistory.orderId, id), eq(orderStatusHistory.businessId, businessId)),
-        )
-        .orderBy(asc(orderStatusHistory.createdAt), asc(orderStatusHistory.id));
+      const [historyRows, paymentRows] = await Promise.all([
+        tx
+          .select()
+          .from(orderStatusHistory)
+          .where(
+            and(eq(orderStatusHistory.orderId, id), eq(orderStatusHistory.businessId, businessId)),
+          )
+          .orderBy(asc(orderStatusHistory.createdAt), asc(orderStatusHistory.id)),
+        tx
+          .select()
+          .from(payments)
+          .where(and(eq(payments.orderId, id), eq(payments.businessId, businessId)))
+          .orderBy(asc(payments.paymentDate), asc(payments.createdAt), asc(payments.id)),
+      ]);
 
       return {
         order: toOrder(updated[0]),
         items: itemRows.map(toItem),
         history: historyRows.map(toHistory),
+        payments: paymentRows.map(toPayment),
       };
     });
   }
@@ -599,17 +708,37 @@ export class DrizzleOrderRepository implements IOrderRepository {
     if (!businessId || !isUuid(id)) return null;
 
     return await getDb().transaction(async (tx) => {
+      const lockedRows = await tx
+        .select()
+        .from(orders)
+        .where(and(eq(orders.id, id), eq(orders.businessId, businessId)))
+        .for('update');
+      if (lockedRows.length === 0) {
+        throw new NotFoundError('Order not found');
+      }
+      const lockedOrder = lockedRows[0];
+
+      if (!ORDER_TRANSITIONS[lockedOrder.status].includes(status)) {
+        throw new InvalidStatusTransitionError(lockedOrder.status, status);
+      }
+      if (lockedOrder.version !== expectedVersion) {
+        throw new OrderChangedError();
+      }
+
       const now = new Date();
+      const nextDueAmount = isOrderClosedForPayment(status)
+        ? 0
+        : lockedOrder.total - lockedOrder.paidAmount;
+
       const updated = await tx
         .update(orders)
-        .set({ status, version: expectedVersion + 1, updatedAt: now })
-        .where(
-          and(
-            eq(orders.id, id),
-            eq(orders.businessId, businessId),
-            eq(orders.version, expectedVersion),
-          ),
-        )
+        .set({
+          status,
+          dueAmount: nextDueAmount,
+          version: lockedOrder.version + 1,
+          updatedAt: now,
+        })
+        .where(and(eq(orders.id, id), eq(orders.businessId, businessId)))
         .returning();
 
       if (updated.length === 0) return null;
@@ -617,7 +746,7 @@ export class DrizzleOrderRepository implements IOrderRepository {
       await tx.insert(orderStatusHistory).values({
         businessId,
         orderId: id,
-        fromStatus: history.fromStatus ?? null,
+        fromStatus: lockedOrder.status,
         toStatus: status,
         note: history.note,
         changedByUserId: history.changedByUserId,
@@ -629,31 +758,38 @@ export class DrizzleOrderRepository implements IOrderRepository {
         await this.applyStockMoves(tx, businessId, id, stockMoves);
       }
 
-      const itemRows = await tx
-        .select()
-        .from(orderItems)
-        .where(and(eq(orderItems.orderId, id), eq(orderItems.businessId, businessId)))
-        .orderBy(asc(orderItems.position), asc(orderItems.createdAt), asc(orderItems.id));
-
-      const historyRows = await tx
-        .select()
-        .from(orderStatusHistory)
-        .where(
-          and(eq(orderStatusHistory.orderId, id), eq(orderStatusHistory.businessId, businessId)),
-        )
-        .orderBy(asc(orderStatusHistory.createdAt), asc(orderStatusHistory.id));
+      const [itemRows, historyRows, paymentRows] = await Promise.all([
+        tx
+          .select()
+          .from(orderItems)
+          .where(and(eq(orderItems.orderId, id), eq(orderItems.businessId, businessId)))
+          .orderBy(asc(orderItems.position), asc(orderItems.createdAt), asc(orderItems.id)),
+        tx
+          .select()
+          .from(orderStatusHistory)
+          .where(
+            and(eq(orderStatusHistory.orderId, id), eq(orderStatusHistory.businessId, businessId)),
+          )
+          .orderBy(asc(orderStatusHistory.createdAt), asc(orderStatusHistory.id)),
+        tx
+          .select()
+          .from(payments)
+          .where(and(eq(payments.orderId, id), eq(payments.businessId, businessId)))
+          .orderBy(asc(payments.paymentDate), asc(payments.createdAt), asc(payments.id)),
+      ]);
 
       return {
         order: toOrder(updated[0]),
         items: itemRows.map(toItem),
         history: historyRows.map(toHistory),
+        payments: paymentRows.map(toPayment),
       };
     });
   }
 
   private async readDetail(row: typeof orders.$inferSelect): Promise<OrderDetail> {
     const businessId = row.businessId;
-    const [itemRows, historyRows] = await Promise.all([
+    const [itemRows, historyRows, paymentRows] = await Promise.all([
       getDb()
         .select()
         .from(orderItems)
@@ -669,12 +805,18 @@ export class DrizzleOrderRepository implements IOrderRepository {
           ),
         )
         .orderBy(asc(orderStatusHistory.createdAt), asc(orderStatusHistory.id)),
+      getDb()
+        .select()
+        .from(payments)
+        .where(and(eq(payments.orderId, row.id), eq(payments.businessId, businessId)))
+        .orderBy(asc(payments.paymentDate), asc(payments.createdAt), asc(payments.id)),
     ]);
 
     return {
       order: toOrder(row),
       items: itemRows.map(toItem),
       history: historyRows.map(toHistory),
+      payments: paymentRows.map(toPayment),
     };
   }
 

@@ -6,11 +6,13 @@ import type {
   OrderStatusChangeRequest,
   OrderStatusType,
   OrderUpdateRequest,
+  PaymentStatusFilterType,
 } from '@f-commerce/contracts';
 import { apiFetch } from './auth-client';
 
 export interface OrderQuery {
   statuses?: OrderStatusType[];
+  paymentStatuses?: PaymentStatusFilterType[];
   q?: string;
   limit?: number;
   cursor?: string | null;
@@ -21,6 +23,9 @@ export interface OrderErrorBody {
   message?: string;
   fields?: string[];
   existingOrder?: DuplicateOrderExisting;
+  dueAmount?: number;
+  paidAmount?: number;
+  total?: number;
 }
 
 /** A failed order request with the server's machine-readable details. */
@@ -79,6 +84,9 @@ async function parseResponse<T>(response: Response): Promise<T> {
         ? record.fields.filter((field): field is string => typeof field === 'string')
         : undefined,
       existingOrder: toExistingOrder(record.existingOrder),
+      dueAmount: typeof record.dueAmount === 'number' ? record.dueAmount : undefined,
+      paidAmount: typeof record.paidAmount === 'number' ? record.paidAmount : undefined,
+      total: typeof record.total === 'number' ? record.total : undefined,
     };
 
     throw new OrderApiError(
@@ -100,6 +108,9 @@ export function buildOrderQuery(query: OrderQuery): string {
   if (query.statuses && query.statuses.length > 0) {
     params.set('status', query.statuses.join(','));
   }
+  if (query.paymentStatuses && query.paymentStatuses.length > 0) {
+    params.set('paymentStatus', query.paymentStatuses.join(','));
+  }
   const search = query.q?.trim();
   if (search) params.set('q', search);
   if (query.limit !== undefined) params.set('limit', String(query.limit));
@@ -120,7 +131,9 @@ export async function getOrder(id: string): Promise<OrderDto> {
 }
 
 export async function createOrder(
-  input: OrderCreateRequest,
+  input: Omit<OrderCreateRequest, 'initialPayment'> & {
+    initialPayment?: OrderCreateRequest['initialPayment'];
+  },
   idempotencyKey: string,
 ): Promise<OrderDto> {
   const response = await apiFetch('/api/orders', {

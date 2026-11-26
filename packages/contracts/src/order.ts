@@ -1,6 +1,12 @@
 import { z } from 'zod';
 
-import { IsoDateTimeSchema } from './datetime.js';
+import {
+  CreateOptionalDateSchema,
+  EditOptionalDateSchema,
+  IsoDateSchema,
+  IsoDateTimeSchema,
+} from './datetime.js';
+import { InitialPaymentSchema, PaymentEntrySchema, PaymentStatusSchema } from './payment.js';
 
 /** The status path an order follows, from creation to its final state. */
 export const ORDER_STATUSES = [
@@ -44,6 +50,7 @@ export const OrderErrorCode = {
   ORDER_CHANGED: 'ORDER_CHANGED',
   INVALID_STATUS_TRANSITION: 'INVALID_STATUS_TRANSITION',
   DUPLICATE_ORDER: 'DUPLICATE_ORDER',
+  TOTAL_BELOW_PAID: 'TOTAL_BELOW_PAID',
 } as const;
 
 export type OrderAuditActionType = (typeof OrderAuditAction)[keyof typeof OrderAuditAction];
@@ -88,39 +95,6 @@ const editOptionalText = z
     return value === '' ? null : value;
   });
 
-/**
- * A promised delivery date travels as `YYYY-MM-DD` and stays a plain string,
- * so it is never turned into a JavaScript Date and never shifts by timezone.
- * `z.iso.date()` rejects an impossible calendar day such as `2026-02-30`.
- */
-const isoDateSchema = z.iso.date('Must be a real calendar date in YYYY-MM-DD');
-
-/**
- * The blank rule runs before the date check: `z.iso.date()` rejects an empty
- * string, so an omitted, null, or blank create value becomes null first.
- */
-const createOptionalDate = z
-  .union([z.string(), z.null()])
-  .optional()
-  .transform((value) => {
-    if (value === null || value === undefined) return null;
-    const trimmed = value.trim();
-    return trimmed === '' ? null : trimmed;
-  })
-  .pipe(isoDateSchema.nullable());
-
-/** Edit keeps an omitted date unchanged, while null or blank clears it. */
-const editOptionalDate = z
-  .union([z.string(), z.null()])
-  .optional()
-  .transform((value) => {
-    if (value === undefined) return undefined;
-    if (value === null) return null;
-    const trimmed = value.trim();
-    return trimmed === '' ? null : trimmed;
-  })
-  .pipe(isoDateSchema.nullable().optional());
-
 /** One line in a create request. Lines with the same pair are merged server side. */
 export const OrderItemInputSchema = z.object({
   productId: z.string().uuid(),
@@ -142,8 +116,9 @@ export const OrderCreateSchema = z.object({
   discount: moneyInput.optional().default(0),
   shippingAddress: createOptionalText,
   notes: createOptionalText,
-  deliveryDeadline: createOptionalDate,
+  deliveryDeadline: CreateOptionalDateSchema,
   confirmDuplicate: z.boolean().optional().default(false),
+  initialPayment: InitialPaymentSchema.nullable().optional(),
 });
 
 export const OrderUpdateSchema = z.object({
@@ -155,7 +130,7 @@ export const OrderUpdateSchema = z.object({
   shippingAddress: editOptionalText,
   notes: editOptionalText,
   source: OrderSourceSchema.optional(),
-  deliveryDeadline: editOptionalDate,
+  deliveryDeadline: EditOptionalDateSchema,
 });
 
 export const OrderStatusChangeSchema = z.object({
@@ -205,18 +180,21 @@ export const OrderSchema = z.object({
   customerPhone: z.string(),
   shippingAddress: z.string().nullable(),
   notes: z.string().nullable(),
-  deliveryDeadline: z.iso.date().nullable(),
+  deliveryDeadline: IsoDateSchema.nullable(),
   subtotal: z.number().int(),
   deliveryFee: z.number().int(),
   discount: z.number().int(),
   total: z.number().int(),
   paidAmount: z.number().int(),
   dueAmount: z.number().int(),
+  refundOwed: z.number().int(),
+  paymentStatus: PaymentStatusSchema,
   version: z.number().int(),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
   items: z.array(OrderItemSchema),
   history: z.array(OrderStatusHistorySchema),
+  payments: z.array(PaymentEntrySchema),
 });
 
 export const OrderSummarySchema = z.object({
@@ -225,9 +203,12 @@ export const OrderSummarySchema = z.object({
   status: OrderStatusSchema,
   customerName: z.string(),
   total: z.number().int(),
+  paidAmount: z.number().int(),
   dueAmount: z.number().int(),
+  refundOwed: z.number().int(),
+  paymentStatus: PaymentStatusSchema,
   source: OrderSourceSchema.nullable(),
-  deliveryDeadline: z.iso.date().nullable(),
+  deliveryDeadline: IsoDateSchema.nullable(),
   itemCount: z.number().int(),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,

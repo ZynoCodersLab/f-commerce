@@ -10,10 +10,11 @@ import {
   date,
   index,
   uniqueIndex,
+  check,
 } from 'drizzle-orm/pg-core';
 import type { Address, Business } from '../../../domain/entities/business.entity.js';
 import type { OrderStatus } from '../../../domain/entities/order.entity.js';
-import type { PaymentMethod } from '../../../domain/entities/financial.entity.js';
+import type { PaymentKind, PaymentMethod } from '../../../domain/entities/financial.entity.js';
 import type { InventoryTransactionType } from '../../../domain/entities/inventory.entity.js';
 
 const timestamps = {
@@ -302,6 +303,11 @@ export const orders = pgTable(
       table.id,
     ),
     index('orders_business_created_idx').on(table.businessId, table.createdAt, table.id),
+    check(
+      'orders_paid_within_total',
+      sql`${table.paidAmount} >= 0 AND ${table.paidAmount} <= ${table.total}`,
+    ),
+    check('orders_due_non_negative', sql`${table.dueAmount} >= 0`),
   ],
 );
 
@@ -440,14 +446,43 @@ export const payments = pgTable(
     orderId: uuid('order_id')
       .notNull()
       .references(() => orders.id, { onDelete: 'cascade' }),
+    kind: text('kind')
+      .$type<PaymentKind>()
+      .notNull()
+      .default('PAYMENT' as PaymentKind),
     amount: integer('amount').notNull(),
     method: text('method').$type<PaymentMethod>().notNull(),
     referenceNumber: text('reference_number'),
     notes: text('notes'),
-    paymentDate: timestamp('payment_date', { withTimezone: true }).notNull().defaultNow(),
+    // Business calendar day in YYYY-MM-DD; string mode keeps it timezone-free.
+    paymentDate: date('payment_date', { mode: 'string' }).notNull(),
+    recordedByUserId: uuid('recorded_by_user_id').notNull(),
+    recordedByName: text('recorded_by_name').notNull(),
+    voidedAt: timestamp('voided_at', { withTimezone: true }),
+    voidedByUserId: uuid('voided_by_user_id'),
+    voidedByName: text('voided_by_name'),
+    voidReason: text('void_reason'),
+    idempotencyKey: text('idempotency_key'),
     ...timestamps,
   },
-  (table) => [index('payments_business_order_idx').on(table.businessId, table.orderId)],
+  (table) => [
+    index('payments_business_order_idx').on(table.businessId, table.orderId),
+    index('payments_business_date_idx').on(
+      table.businessId,
+      table.paymentDate,
+      table.createdAt,
+      table.id,
+    ),
+    uniqueIndex('payments_business_idempotency_unq')
+      .on(table.businessId, table.idempotencyKey)
+      .where(sql`${table.idempotencyKey} IS NOT NULL`),
+    check('payments_amount_positive', sql`${table.amount} > 0`),
+    check('payments_kind_valid', sql`${table.kind} IN ('PAYMENT', 'REFUND')`),
+    check(
+      'payments_void_fields_consistent',
+      sql`(${table.voidedAt} IS NULL AND ${table.voidedByUserId} IS NULL AND ${table.voidedByName} IS NULL AND ${table.voidReason} IS NULL) OR (${table.voidedAt} IS NOT NULL AND ${table.voidedByUserId} IS NOT NULL AND ${table.voidedByName} IS NOT NULL AND ${table.voidReason} IS NOT NULL)`,
+    ),
+  ],
 );
 
 export const expenseCategories = pgTable('expense_categories', {

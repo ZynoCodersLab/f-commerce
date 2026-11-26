@@ -1,4 +1,6 @@
+import type { PaymentStatusFilterType } from '@f-commerce/contracts';
 import { Customer } from '../entities/customer.entity.js';
+import { PaymentMethod } from '../entities/financial.entity.js';
 import { OrderDetail, OrderStatus, OrderSummary } from '../entities/order.entity.js';
 
 /** The product fields an order line needs when the catalog is resolved. */
@@ -35,11 +37,24 @@ export interface OrderCreateData {
   discount: number;
   subtotal: number;
   total: number;
+  paidAmount: number;
   dueAmount: number;
   shippingAddress: string | null;
   notes: string | null;
   deliveryDeadline: string | null;
   idempotencyKey: string | null;
+}
+
+/** Optional first payment written in the same transaction as order creation. */
+export interface OrderInitialPaymentWrite {
+  amount: number;
+  method: PaymentMethod;
+  paymentDate: string;
+  referenceNumber: string | null;
+  notes: string | null;
+  recordedByUserId: string;
+  recordedByName: string;
+  auditAction: string;
 }
 
 /** A fully resolved line, ready to be written. `id` marks an existing line. */
@@ -80,6 +95,7 @@ export interface OrderAuditEntry {
 
 export interface OrderListQuery {
   statuses: OrderStatus[];
+  paymentStatuses?: PaymentStatusFilterType[];
   /** Trimmed search text, matched as a contains across the allowed fields. */
   q: string;
   /** The digits of the search text, matched against the phone snapshot. */
@@ -124,11 +140,13 @@ export interface IOrderRepository {
   findCatalogProducts(ids: string[]): Promise<OrderCatalogProduct[]>;
   findCatalogVariants(ids: string[]): Promise<OrderCatalogVariant[]>;
   findActorName(userId: string): Promise<string | null>;
+  findBusinessPaymentSettings(): Promise<{ currency: string; timezone: string } | null>;
   create(
     data: OrderCreateData,
     items: OrderWriteItem[],
     history: OrderHistoryWrite,
     audit: OrderAuditEntry,
+    initialPayment?: OrderInitialPaymentWrite | null,
   ): Promise<OrderDetail>;
   update(
     id: string,

@@ -129,6 +129,8 @@ businessRouter.get(
         return;
       }
 
+      const role = requestContext.getStore()?.role;
+
       res.status(200).json({
         success: true,
         data: {
@@ -138,6 +140,7 @@ businessRouter.get(
           logoUrl: business.logoUrl ?? null,
           address: business.address ?? null,
           onboardingComplete: business.onboardingComplete,
+          ...(role !== undefined ? { role } : {}),
           onboardingDraft: business.onboardingDraft,
         },
         message: 'Business profile retrieved',

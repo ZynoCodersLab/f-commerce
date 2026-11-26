@@ -9,9 +9,15 @@ import type {
   OrderDto,
   OrderSourceType,
   OrderUpdateRequest,
+  PaymentMethodType,
   ProductDto,
 } from '@f-commerce/contracts';
-import { ORDER_SOURCES, OrderCreateSchema, OrderUpdateSchema } from '@f-commerce/contracts';
+import {
+  ORDER_SOURCES,
+  OrderCreateSchema,
+  OrderUpdateSchema,
+  availablePaymentMethods,
+} from '@f-commerce/contracts';
 import {
   Alert,
   Button,
@@ -29,6 +35,12 @@ import { isTimeoutError } from '@/lib/auth-client';
 import { formatDateTime, formatMoney } from '@/lib/catalog-format';
 import { todayInTimeZone } from '@/lib/timezone';
 import { OrderApiError, createOrder, updateOrder } from '@/lib/order-client';
+import {
+  PAYMENT_METHOD_LABEL,
+  isCardMethod,
+  parsePaymentAmountInput,
+  paymentReferenceLabel,
+} from '@/lib/payment-format';
 import {
   MAX_LINE_QUANTITY,
   MAX_ORDER_LINES,
@@ -64,6 +76,11 @@ const FIELD_MESSAGES: Record<string, string> = {
   notes: 'Keep notes to 500 characters or fewer.',
   deliveryDeadline: 'Enter a real calendar date.',
   total: 'The order total is above the allowed limit.',
+  'initialPayment.amount': 'Enter a whole amount from 1 up to the order total.',
+  'initialPayment.method': 'Choose a payment method available for this business currency.',
+  'initialPayment.paymentDate': 'Enter a real calendar date on or before today.',
+  'initialPayment.referenceNumber': 'Keep the reference to 100 characters or fewer.',
+  'initialPayment.notes': 'Keep payment notes to 500 characters or fewer.',
 };
 
 function initialLines(order: OrderDto | undefined): OrderLineState[] {
@@ -95,7 +112,17 @@ function initialCustomer(order: OrderDto | undefined): OrderCustomerSelection | 
 
 function fieldsFromIssues(issues: { path: PropertyKey[] }[]): string[] {
   return Array.from(
-    new Set(issues.map((issue) => String(issue.path[0] ?? '')).filter((field) => field !== '')),
+    new Set(
+      issues
+        .map((issue) => {
+          const first = String(issue.path[0] ?? '');
+          if (first === 'initialPayment' && issue.path.length > 1) {
+            return `${first}.${String(issue.path[1])}`;
+          }
+          return first;
+        })
+        .filter((field) => field !== ''),
+    ),
   );
 }
 
@@ -144,6 +171,13 @@ export function OrderForm({
   const [notes, setNotes] = useState(order?.notes ?? '');
   const [deliveryDeadline, setDeliveryDeadline] = useState(order?.deliveryDeadline ?? '');
 
+  // Create only optional first payment state.
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodType>('CASH');
+  const [paymentReference, setPaymentReference] = useState('');
+  const [paymentDateOverride, setPaymentDateOverride] = useState<string | null>(null);
+  const [paymentNotes, setPaymentNotes] = useState('');
+
   const [fieldErrors, setFieldErrors] = useState<string[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateOrderExisting | null>(null);
@@ -162,6 +196,19 @@ export function OrderForm({
     deliveryDeadline !== '' &&
     isRealCalendarDate(deliveryDeadline) &&
     deliveryDeadline < today;
+
+  const allowedPaymentMethods = availablePaymentMethods(currency);
+  const effectivePaymentMethod: PaymentMethodType = allowedPaymentMethods.includes(paymentMethod)
+    ? paymentMethod
+    : 'CASH';
+  const effectivePaymentDate = paymentDateOverride ?? today ?? '';
+  const hasInitialPayment = mode === 'create' && paymentAmount.trim() !== '';
+  const parsedPaymentAmount = hasInitialPayment ? parsePaymentAmountInput(paymentAmount) : null;
+  const paymentAmountAboveTotal =
+    hasInitialPayment &&
+    parsedPaymentAmount !== null &&
+    totals.total >= 0 &&
+    parsedPaymentAmount > totals.total;
 
   const fieldError = (field: string): string | undefined =>
     fieldErrors.includes(field) ? FIELD_MESSAGES[field] : undefined;
@@ -258,6 +305,35 @@ export function OrderForm({
       errors.push('total');
     }
 
+    let initialPaymentInput: OrderCreateRequest['initialPayment'] = null;
+    if (mode === 'create' && paymentAmount.trim() !== '') {
+      const amount = parsePaymentAmountInput(paymentAmount);
+      if (amount === null || amount > preview.total) {
+        errors.push('initialPayment.amount');
+      }
+      const trimmedDate = effectivePaymentDate.trim();
+      if (trimmedDate !== '') {
+        if (!isRealCalendarDate(trimmedDate) || (today !== null && trimmedDate > today)) {
+          errors.push('initialPayment.paymentDate');
+        }
+      }
+      if (paymentReference.trim().length > 100) {
+        errors.push('initialPayment.referenceNumber');
+      }
+      if (paymentNotes.trim().length > 500) {
+        errors.push('initialPayment.notes');
+      }
+      if (amount !== null) {
+        initialPaymentInput = {
+          amount,
+          method: effectivePaymentMethod,
+          paymentDate: trimmedDate === '' ? null : trimmedDate,
+          referenceNumber: paymentReference.trim() === '' ? null : paymentReference.trim(),
+          notes: paymentNotes.trim() === '' ? null : paymentNotes.trim(),
+        };
+      }
+    }
+
     if (errors.length > 0) {
       setFieldErrors(Array.from(new Set(errors)));
       setFormError('Check the highlighted fields.');
@@ -291,7 +367,8 @@ export function OrderForm({
         notes,
         deliveryDeadline,
         confirmDuplicate,
-      } satisfies OrderCreateRequest);
+        initialPayment: initialPaymentInput,
+      });
       if (!parsed.success) {
         applyIssues(parsed.error.issues);
         return;
@@ -299,7 +376,12 @@ export function OrderForm({
 
       if (idempotencyKey.current === '') idempotencyKey.current = makeIdempotencyKey();
       const key = idempotencyKey.current;
-      run = () => createOrder(parsed.data, key);
+      // Leave initialPayment out of the JSON body when blank so the 60 second create flow is unchanged.
+      const createPayload =
+        parsed.data.initialPayment == null
+          ? { ...parsed.data, initialPayment: undefined }
+          : parsed.data;
+      run = () => createOrder(createPayload, key);
     } else {
       if (!order) return;
       const editItems = parsedLines.flatMap(({ line, quantity, price }) => {
@@ -350,6 +432,16 @@ export function OrderForm({
         if (error.code === 'ORDER_CHANGED' || error.code === 'ORDER_LOCKED') {
           setFormError(error.message);
           onConflict?.();
+          return;
+        }
+        if (error.code === 'TOTAL_BELOW_PAID') {
+          const paidDetail =
+            error.body.paidAmount !== undefined
+              ? ` (${formatMoney(error.body.paidAmount, currency)} paid)`
+              : '';
+          setFormError(
+            `Order total cannot be lower than the amount already paid${paidDetail}. Refund or void payments before lowering the order total.`,
+          );
           return;
         }
         setFormError(error.message);
@@ -695,6 +787,138 @@ export function OrderForm({
               </dd>
             </div>
           </dl>
+
+          {mode === 'create' && (
+            <section
+              aria-labelledby="order-initial-payment-heading"
+              className="grid gap-3 border-t border-border pt-4"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h3
+                    className="text-base font-semibold text-ink"
+                    id="order-initial-payment-heading"
+                  >
+                    Payment received
+                  </h3>
+                  <p className="text-xs text-body">Leave amount blank if unpaid.</p>
+                </div>
+                <Button
+                  disabled={isSaving || totals.total < 1}
+                  onClick={() => {
+                    setPaymentAmount(String(totals.total));
+                    setFieldErrors((current) =>
+                      current.filter((item) => item !== 'initialPayment.amount'),
+                    );
+                  }}
+                  type="button"
+                  variant="secondary"
+                >
+                  Full amount
+                </Button>
+              </div>
+
+              <Field
+                error={
+                  paymentAmountAboveTotal
+                    ? `Amount cannot exceed the live total of ${formatMoney(totals.total, currency)}.`
+                    : fieldError('initialPayment.amount')
+                }
+                htmlFor="order-payment-amount"
+                label="Amount received"
+              >
+                <Input
+                  aria-invalid={
+                    paymentAmountAboveTotal || fieldError('initialPayment.amount') !== undefined
+                      ? true
+                      : undefined
+                  }
+                  disabled={isSaving}
+                  id="order-payment-amount"
+                  inputMode="numeric"
+                  min={1}
+                  onChange={(event) => {
+                    setPaymentAmount(event.target.value);
+                    setFieldErrors((current) =>
+                      current.filter((item) => item !== 'initialPayment.amount'),
+                    );
+                  }}
+                  placeholder="0"
+                  type="number"
+                  value={paymentAmount}
+                />
+              </Field>
+
+              <Field
+                error={fieldError('initialPayment.method')}
+                htmlFor="order-payment-method"
+                label="Payment method"
+              >
+                <Select
+                  disabled={isSaving}
+                  id="order-payment-method"
+                  onChange={(event) => setPaymentMethod(event.target.value as PaymentMethodType)}
+                  value={effectivePaymentMethod}
+                >
+                  {allowedPaymentMethods.map((method) => (
+                    <option key={method} value={method}>
+                      {PAYMENT_METHOD_LABEL[method]}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+
+              <Field
+                description={
+                  isCardMethod(effectivePaymentMethod)
+                    ? 'Never enter a full card number. Store only the receipt or transaction reference.'
+                    : undefined
+                }
+                error={fieldError('initialPayment.referenceNumber')}
+                htmlFor="order-payment-reference"
+                label={paymentReferenceLabel(effectivePaymentMethod)}
+              >
+                <Input
+                  disabled={isSaving}
+                  id="order-payment-reference"
+                  maxLength={100}
+                  onChange={(event) => setPaymentReference(event.target.value)}
+                  type="text"
+                  value={paymentReference}
+                />
+              </Field>
+
+              <Field
+                error={fieldError('initialPayment.paymentDate')}
+                htmlFor="order-payment-date"
+                label="Payment date"
+              >
+                <Input
+                  disabled={isSaving}
+                  id="order-payment-date"
+                  max={today ?? undefined}
+                  onChange={(event) => setPaymentDateOverride(event.target.value)}
+                  type="date"
+                  value={effectivePaymentDate}
+                />
+              </Field>
+
+              <Field
+                error={fieldError('initialPayment.notes')}
+                htmlFor="order-payment-notes"
+                label="Payment notes (optional)"
+              >
+                <Textarea
+                  disabled={isSaving}
+                  id="order-payment-notes"
+                  maxLength={500}
+                  onChange={(event) => setPaymentNotes(event.target.value)}
+                  placeholder="Optional payment note."
+                  value={paymentNotes}
+                />
+              </Field>
+            </section>
+          )}
 
           <div className="grid gap-3">
             <Button disabled={isSaving} type="submit">

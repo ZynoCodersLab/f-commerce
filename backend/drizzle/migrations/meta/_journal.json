@@ -64,6 +64,27 @@
       "when": 1793520532395,
       "tag": "0008_silky_omega_red",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795720847921,
+      "tag": "0009_payments_add_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795720850432,
+      "tag": "0010_backfill_payments",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795720898487,
+      "tag": "0011_payments_finalize",
+      "breakpoints": true
     }
   ]
 }

@@ -31,11 +31,14 @@ function makeOrder(overrides: Partial<OrderDto> = {}): OrderDto {
     total: 2500,
     paidAmount: 0,
     dueAmount: 2500,
+    refundOwed: 0,
+    paymentStatus: 'UNPAID',
     version: 1,
     createdAt: CREATED_AT,
     updatedAt: CREATED_AT,
     items: [],
     history: [],
+    payments: [],
     ...overrides,
   };
 }

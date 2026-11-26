@@ -14,5 +14,6 @@ export * from './customer.js';
 export * from './datetime.js';
 export * from './email.js';
 export * from './order.js';
+export * from './payment.js';
 export * from './product.js';
 export * from './team.js';

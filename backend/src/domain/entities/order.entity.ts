@@ -1,4 +1,5 @@
 import { TenantEntity } from './base.entity.js';
+import { Payment } from './financial.entity.js';
 
 export enum OrderStatus {
   PENDING = 'PENDING',
@@ -78,7 +79,7 @@ export interface Order extends TenantEntity {
   discount: number;
   total: number; // subtotal + deliveryFee - discount
   paidAmount: number;
-  dueAmount: number; // total - paidAmount
+  dueAmount: number; // total - paidAmount when active, 0 when CANCELLED or RETURNED
   shippingAddress?: string;
   courierId?: string;
   trackingNumber?: string;
@@ -119,6 +120,7 @@ export interface OrderDetail {
   order: Order;
   items: OrderItem[];
   history: OrderStatusHistory[];
+  payments: Payment[];
 }
 
 /** A list row without the full item and history payload. */
@@ -128,6 +130,7 @@ export interface OrderSummary {
   status: OrderStatus;
   customerNameSnapshot: string;
   total: number;
+  paidAmount: number;
   dueAmount: number;
   source?: string;
   deliveryDeadline?: string; // YYYY-MM-DD, the promised delivery date

@@ -3,7 +3,11 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Plus, Search, ShoppingBag } from 'lucide-react';
-import type { OrderStatusType, OrderSummaryDto } from '@f-commerce/contracts';
+import type {
+  OrderStatusType,
+  OrderSummaryDto,
+  PaymentStatusFilterType,
+} from '@f-commerce/contracts';
 import { AppShell } from '@/components/shell/shell';
 import {
   Button,
@@ -19,6 +23,7 @@ import {
 } from '@/components/ui/primitives';
 import { OrderStatusBadge } from '@/components/orders/order-status';
 import { OrderDeadlineCell } from '@/components/orders/order-deadline';
+import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
 import { useBusinessSettings } from '@/components/business/business-settings-provider';
 import { formatDateTime, formatMoney } from '@/lib/catalog-format';
 import { useRequireAuth } from '@/lib/auth-guard';
@@ -28,6 +33,7 @@ import { ORDER_ACTIVE_STATUSES, ORDER_STATUS_LABEL, orderSourceLabel } from '@/l
 const PAGE_SIZE = 20;
 
 type StatusFilter = 'active' | 'all' | OrderStatusType;
+type PaymentFilter = 'all' | 'has_due' | PaymentStatusFilterType;
 
 const FILTERS: { key: StatusFilter; label: string }[] = [
   { key: 'active', label: 'Active' },
@@ -41,9 +47,24 @@ const FILTERS: { key: StatusFilter; label: string }[] = [
   { key: 'RETURNED', label: ORDER_STATUS_LABEL.RETURNED },
 ];
 
+const PAYMENT_FILTERS: { key: PaymentFilter; label: string }[] = [
+  { key: 'all', label: 'All payments' },
+  { key: 'has_due', label: 'Has due' },
+  { key: 'UNPAID', label: 'Unpaid' },
+  { key: 'PARTIAL', label: 'Partial' },
+  { key: 'PAID', label: 'Paid' },
+  { key: 'REFUND_OWED', label: 'Refund owed' },
+];
+
 function statusesForFilter(filter: StatusFilter): OrderStatusType[] | undefined {
   if (filter === 'active') return ORDER_ACTIVE_STATUSES;
   if (filter === 'all') return undefined;
+  return [filter];
+}
+
+function paymentStatusesForFilter(filter: PaymentFilter): PaymentStatusFilterType[] | undefined {
+  if (filter === 'all') return undefined;
+  if (filter === 'has_due') return ['UNPAID', 'PARTIAL'];
   return [filter];
 }
 
@@ -54,6 +75,7 @@ export default function OrdersPage() {
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [filter, setFilter] = useState<StatusFilter>('active');
+  const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all');
   const [rows, setRows] = useState<OrderSummaryDto[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -76,6 +98,7 @@ export default function OrdersPage() {
 
     listOrders({
       statuses: statusesForFilter(filter),
+      paymentStatuses: paymentStatusesForFilter(paymentFilter),
       q: debouncedQuery,
       limit: PAGE_SIZE,
     })
@@ -98,7 +121,7 @@ export default function OrdersPage() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery, filter, reloadToken]);
+  }, [debouncedQuery, filter, paymentFilter, reloadToken]);
 
   const loadMore = async () => {
     if (nextCursor === null || isLoading) return;
@@ -108,6 +131,7 @@ export default function OrdersPage() {
     try {
       const page = await listOrders({
         statuses: statusesForFilter(filter),
+        paymentStatuses: paymentStatusesForFilter(paymentFilter),
         q: debouncedQuery,
         limit: PAGE_SIZE,
         cursor: nextCursor,
@@ -123,11 +147,13 @@ export default function OrdersPage() {
     }
   };
 
-  const filtersActive = filter !== 'active' || debouncedQuery.trim() !== '';
+  const filtersActive =
+    filter !== 'active' || paymentFilter !== 'all' || debouncedQuery.trim() !== '';
 
   const clearFilters = () => {
     invalidateListRequests();
     setFilter('active');
+    setPaymentFilter('all');
     setQuery('');
     setDebouncedQuery('');
     setRows([]);
@@ -140,6 +166,16 @@ export default function OrdersPage() {
     if (next === filter) return;
     invalidateListRequests();
     setFilter(next);
+    setRows([]);
+    setNextCursor(null);
+    setIsLoading(true);
+    setError(null);
+  };
+
+  const changePaymentFilter = (next: PaymentFilter) => {
+    if (next === paymentFilter) return;
+    invalidateListRequests();
+    setPaymentFilter(next);
     setRows([]);
     setNextCursor(null);
     setIsLoading(true);
@@ -181,6 +217,11 @@ export default function OrdersPage() {
       render: (row: OrderSummaryDto) => <OrderStatusBadge status={row.status} />,
     },
     {
+      key: 'paymentStatus' as const,
+      label: 'Payment',
+      render: (row: OrderSummaryDto) => <PaymentStatusBadge status={row.paymentStatus} />,
+    },
+    {
       key: 'deliveryDeadline' as const,
       label: 'Delivery deadline',
       render: (row: OrderSummaryDto) => <OrderDeadlineCell row={row} />,
@@ -217,6 +258,7 @@ export default function OrdersPage() {
 
   const emptyTitle = (() => {
     if (debouncedQuery.trim() !== '') return `No orders match “${debouncedQuery.trim()}”`;
+    if (paymentFilter !== 'all') return 'No orders match these filters';
     if (filter === 'active') return 'No active orders';
     if (filter === 'all') return 'No orders yet';
     return `No ${ORDER_STATUS_LABEL[filter].toLowerCase()} orders`;
@@ -313,6 +355,31 @@ export default function OrdersPage() {
               );
             })}
           </div>
+
+          <div
+            aria-label="Filter orders by payment status"
+            className="flex flex-wrap gap-2"
+            role="group"
+          >
+            {PAYMENT_FILTERS.map((entry) => {
+              const active = paymentFilter === entry.key;
+              return (
+                <button
+                  aria-pressed={active}
+                  className={`inline-flex min-h-11 items-center rounded-full border px-4 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky ${
+                    active
+                      ? 'border-sky bg-sky-soft text-sky-strong'
+                      : 'border-border bg-surface text-body hover:border-sky hover:text-ink'
+                  }`}
+                  key={entry.key}
+                  onClick={() => changePaymentFilter(entry.key)}
+                  type="button"
+                >
+                  {entry.label}
+                </button>
+              );
+            })}
+          </div>
         </section>
 
         {isLoading && rows.length === 0 && (
@@ -367,7 +434,10 @@ export default function OrdersPage() {
                       </Link>
                       <h3 className="mt-1 font-semibold text-ink">{row.customerName}</h3>
                     </div>
-                    <OrderStatusBadge status={row.status} />
+                    <div className="flex flex-wrap items-center justify-end gap-1.5">
+                      <OrderStatusBadge status={row.status} />
+                      <PaymentStatusBadge status={row.paymentStatus} />
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3 border-t border-border pt-3 text-sm">
                     <div>

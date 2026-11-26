@@ -1,27 +1,31 @@
 import {
   OrderCreateRequest,
   OrderDto,
-  ORDER_SOURCES,
   OrderItemInput,
   OrderItemUpdateInput,
   OrderPageDto,
-  OrderSourceType,
   OrderStatusChangeRequest,
-  OrderSummaryDto,
   OrderUpdateRequest,
+  PAYMENT_STATUS_FILTER_VALUES,
+  PaymentAuditAction,
+  PaymentStatusFilterType,
 } from '@f-commerce/contracts';
+import { PaymentMethod } from '../../domain/entities/financial.entity.js';
 import {
   EDITABLE_ORDER_STATUSES,
   getStockMovement,
   ORDER_TRANSITIONS,
-  OrderDetail,
   OrderItem,
   OrderStatus,
 } from '../../domain/entities/order.entity.js';
+import { assertTotalCoversPaid } from '../../domain/order-payments.js';
+import { toOrderDto, toOrderSummaryDto } from './order-dto.js';
+import { validatePaymentAgainstBusiness } from './payment.service.js';
 import {
   IOrderRepository,
   OrderCatalogProduct,
   OrderCatalogVariant,
+  OrderInitialPaymentWrite,
   OrderUpdateData,
   OrderWriteItem,
 } from '../../domain/repositories/order.repository.js';
@@ -30,6 +34,7 @@ import {
   encodeOrderListCursor,
   ORDER_DEFAULT_PAGE_SIZE,
   ORDER_MAX_PAGE_SIZE,
+  orderPaymentStatusKey,
   orderStatusKey,
 } from '../../domain/order-cursor.js';
 import { isUniqueViolation } from './database-errors.js';
@@ -81,89 +86,6 @@ function variantLabel(
     (value): value is string => typeof value === 'string' && value !== '',
   );
   return fallback.length > 0 ? fallback.join(' / ') : null;
-}
-
-function toSource(value: string | undefined): OrderSourceType | null {
-  return value !== undefined && (ORDER_SOURCES as readonly string[]).includes(value)
-    ? (value as OrderSourceType)
-    : null;
-}
-
-function toItemDto(item: OrderItem) {
-  return {
-    id: item.id,
-    productId: item.productId,
-    variantId: item.variantId ?? null,
-    productName: item.productNameSnapshot,
-    variantLabel: item.variantLabelSnapshot ?? null,
-    price: item.priceSnapshot,
-    cost: item.costSnapshot,
-    quantity: item.quantity,
-    subtotal: item.subtotal,
-    position: item.position,
-  };
-}
-
-function toOrderDto(detail: OrderDetail): OrderDto {
-  const order = detail.order;
-  return {
-    id: order.id,
-    orderNumber: order.orderNumber,
-    status: order.status,
-    source: toSource(order.source),
-    customerId: order.customerId,
-    customerName: order.customerNameSnapshot,
-    customerPhone: order.customerPhoneSnapshot,
-    shippingAddress: order.shippingAddress ?? null,
-    notes: order.notes ?? null,
-    deliveryDeadline: order.deliveryDeadline ?? null,
-    subtotal: order.subtotal,
-    deliveryFee: order.deliveryFee,
-    discount: order.discount,
-    total: order.total,
-    paidAmount: order.paidAmount,
-    dueAmount: order.dueAmount,
-    version: order.version,
-    createdAt: order.createdAt.toISOString(),
-    updatedAt: order.updatedAt.toISOString(),
-    items: detail.items.map(toItemDto),
-    history: detail.history.map((row) => ({
-      id: row.id,
-      fromStatus: row.fromStatus,
-      toStatus: row.toStatus,
-      note: row.note ?? null,
-      changedByName: row.changedByName,
-      createdAt: row.createdAt.toISOString(),
-    })),
-  };
-}
-
-function toSummaryDto(summary: {
-  id: string;
-  orderNumber: string;
-  status: OrderStatus;
-  customerNameSnapshot: string;
-  total: number;
-  dueAmount: number;
-  source?: string;
-  deliveryDeadline?: string;
-  itemCount: number;
-  createdAt: Date;
-  updatedAt: Date;
-}): OrderSummaryDto {
-  return {
-    id: summary.id,
-    orderNumber: summary.orderNumber,
-    status: summary.status,
-    customerName: summary.customerNameSnapshot,
-    total: summary.total,
-    dueAmount: summary.dueAmount,
-    source: toSource(summary.source),
-    deliveryDeadline: summary.deliveryDeadline ?? null,
-    itemCount: summary.itemCount,
-    createdAt: summary.createdAt.toISOString(),
-    updatedAt: summary.updatedAt.toISOString(),
-  };
 }
 
 /** Merge lines that share a product and variant, keeping first occurrence order. */
@@ -225,6 +147,26 @@ export class OrderService {
     const items = await this.resolveCreateLines(input.items);
     const totals = this.computeTotals(items, input.deliveryFee, input.discount);
 
+    let resolvedInitialPaymentDate: string | null = null;
+    if (input.initialPayment != null) {
+      const settings = await this.repository.findBusinessPaymentSettings();
+      if (!settings) {
+        throw new NotFoundError('Business not found');
+      }
+      const checked = validatePaymentAgainstBusiness(
+        input.initialPayment,
+        settings,
+        'initialPayment.',
+      );
+      resolvedInitialPaymentDate = checked.paymentDate;
+      if (input.initialPayment.amount > totals.total) {
+        throw new ValidationError(
+          ['initialPayment.amount'],
+          'Initial payment cannot exceed the order total',
+        );
+      }
+    }
+
     if (!input.confirmDuplicate) {
       const duplicate = await this.repository.findDuplicate(
         customer.id,
@@ -242,6 +184,21 @@ export class OrderService {
     }
 
     const actorName = await this.actorName(actor.userId);
+    const paidAmount = input.initialPayment != null ? input.initialPayment.amount : 0;
+    const dueAmount = totals.total - paidAmount;
+    const initialPaymentWrite: OrderInitialPaymentWrite | null =
+      input.initialPayment != null && resolvedInitialPaymentDate !== null
+        ? {
+            amount: input.initialPayment.amount,
+            method: input.initialPayment.method as PaymentMethod,
+            paymentDate: resolvedInitialPaymentDate,
+            referenceNumber: input.initialPayment.referenceNumber,
+            notes: input.initialPayment.notes,
+            recordedByUserId: actor.userId,
+            recordedByName: actorName,
+            auditAction: PaymentAuditAction.RECORDED,
+          }
+        : null;
 
     try {
       const detail = await this.repository.create(
@@ -254,7 +211,8 @@ export class OrderService {
           discount: input.discount,
           subtotal: totals.subtotal,
           total: totals.total,
-          dueAmount: totals.total,
+          paidAmount,
+          dueAmount,
           shippingAddress: input.shippingAddress,
           notes: input.notes,
           deliveryDeadline: input.deliveryDeadline,
@@ -272,6 +230,7 @@ export class OrderService {
           userId: actor.userId,
           action: 'ORDER_CREATED',
         },
+        initialPaymentWrite,
       );
       return { order: toOrderDto(detail), replayed: false };
     } catch (error) {
@@ -295,24 +254,28 @@ export class OrderService {
     rawQ: string | undefined,
     rawLimit: string | undefined,
     rawCursor: string | undefined,
+    rawPaymentStatus?: string,
   ): Promise<OrderPageDto> {
     const statuses = this.parseStatuses(rawStatus);
+    const paymentStatuses = this.parsePaymentStatuses(rawPaymentStatus);
     const q = (rawQ ?? '').trim();
     if (q.length > MAX_SEARCH_LENGTH) {
       throw new ValidationError(['q']);
     }
     const limit = this.parseLimit(rawLimit);
     const statusKey = orderStatusKey(statuses);
+    const paymentStatusKey = orderPaymentStatusKey(paymentStatuses);
 
     let anchor: { createdAt: Date; id: string } | undefined;
     if (rawCursor !== undefined && rawCursor !== '') {
-      const decoded = decodeOrderListCursor(rawCursor, statusKey, q, limit);
+      const decoded = decodeOrderListCursor(rawCursor, statusKey, paymentStatusKey, q, limit);
       if (!decoded) throw new ValidationError(['cursor']);
       anchor = { createdAt: decoded.createdAt, id: decoded.id };
     }
 
     const result = await this.repository.list({
       statuses,
+      paymentStatuses,
       q,
       phoneDigits: q.replace(/[^0-9]/g, ''),
       limit,
@@ -327,12 +290,13 @@ export class OrderService {
             createdAt: last.createdAt,
             id: last.id,
             statuses: statusKey,
+            paymentStatuses: paymentStatusKey,
             q,
             limit,
           })
         : null;
 
-    return { items: result.items.map(toSummaryDto), nextCursor };
+    return { items: result.items.map(toOrderSummaryDto), nextCursor };
   }
 
   async update(id: string, input: OrderUpdateRequest, actor: OrderActor): Promise<OrderDto> {
@@ -340,25 +304,14 @@ export class OrderService {
     if (!detail) throw new NotFoundError('Order not found');
     const order = detail.order;
 
-    // The status lock runs before the version check.
+    // AC-9 check order: ORDER_LOCKED -> resolve lines & compute totals ->
+    // TOTAL_BELOW_PAID -> ORDER_CHANGED -> CUSTOMER_ARCHIVED.
     if (!EDITABLE_ORDER_STATUSES.includes(order.status)) {
       throw new OrderLockedError();
     }
 
-    if (input.version !== order.version) {
-      throw new OrderChangedError();
-    }
-
     const changes: OrderUpdateData = {};
     const changedFields: string[] = [];
-
-    if (input.customerId !== undefined && input.customerId !== order.customerId) {
-      const customer = await this.requireCustomer(input.customerId);
-      changes.customerId = customer.id;
-      changes.customerNameSnapshot = customer.name;
-      changes.customerPhoneSnapshot = customer.phone;
-      changedFields.push('customerId');
-    }
 
     let nextItems: OrderWriteItem[] | null = null;
     if (input.items !== undefined) {
@@ -371,6 +324,38 @@ export class OrderService {
 
     const deliveryFee = input.deliveryFee ?? order.deliveryFee;
     const discount = input.discount ?? order.discount;
+
+    const effectiveLines =
+      nextItems ??
+      detail.items.map((item) => ({
+        id: item.id,
+        productId: item.productId,
+        variantId: item.variantId ?? null,
+        productNameSnapshot: item.productNameSnapshot,
+        variantLabelSnapshot: item.variantLabelSnapshot ?? null,
+        priceSnapshot: item.priceSnapshot,
+        costSnapshot: item.costSnapshot,
+        quantity: item.quantity,
+      }));
+    const totals = this.computeTotals(
+      effectiveLines.map((line, index) => ({ ...line, position: index })),
+      deliveryFee,
+      discount,
+    );
+
+    assertTotalCoversPaid(totals.total, order.paidAmount);
+
+    if (input.version !== order.version) {
+      throw new OrderChangedError();
+    }
+
+    if (input.customerId !== undefined && input.customerId !== order.customerId) {
+      const customer = await this.requireCustomer(input.customerId);
+      changes.customerId = customer.id;
+      changes.customerNameSnapshot = customer.name;
+      changes.customerPhoneSnapshot = customer.phone;
+      changedFields.push('customerId');
+    }
 
     if (input.deliveryFee !== undefined && input.deliveryFee !== order.deliveryFee) {
       changes.deliveryFee = input.deliveryFee;
@@ -404,26 +389,10 @@ export class OrderService {
     }
 
     if (changedFields.length === 0) {
-      return toOrderDto(detail);
+      const fresh = await this.repository.findDetailById(id);
+      return toOrderDto(fresh ?? detail);
     }
 
-    const effectiveLines =
-      nextItems ??
-      detail.items.map((item) => ({
-        id: item.id,
-        productId: item.productId,
-        variantId: item.variantId ?? null,
-        productNameSnapshot: item.productNameSnapshot,
-        variantLabelSnapshot: item.variantLabelSnapshot ?? null,
-        priceSnapshot: item.priceSnapshot,
-        costSnapshot: item.costSnapshot,
-        quantity: item.quantity,
-      }));
-    const totals = this.computeTotals(
-      effectiveLines.map((line, index) => ({ ...line, position: index })),
-      deliveryFee,
-      discount,
-    );
     changes.subtotal = totals.subtotal;
     changes.total = totals.total;
     changes.dueAmount = totals.total - order.paidAmount;
@@ -653,6 +622,21 @@ export class OrderService {
       if (!statuses.includes(status)) statuses.push(status);
     }
     return statuses;
+  }
+
+  private parsePaymentStatuses(raw: string | undefined): PaymentStatusFilterType[] {
+    if (raw === undefined || raw.trim() === '') return [];
+    const result: PaymentStatusFilterType[] = [];
+    for (const part of raw.split(',')) {
+      const value = part.trim();
+      if (value === '') continue;
+      if (!(PAYMENT_STATUS_FILTER_VALUES as readonly string[]).includes(value)) {
+        throw new ValidationError(['paymentStatus']);
+      }
+      const status = value as PaymentStatusFilterType;
+      if (!result.includes(status)) result.push(status);
+    }
+    return result;
   }
 
   private parseLimit(raw: string | undefined): number {

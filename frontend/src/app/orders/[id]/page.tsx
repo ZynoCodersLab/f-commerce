@@ -20,6 +20,8 @@ import {
 } from '@/components/ui/primitives';
 import { OrderForm } from '@/components/orders/order-form';
 import { OrderStatusBadge } from '@/components/orders/order-status';
+import { OrderPaymentsSection } from '@/components/payments/order-payments-section';
+import { PaymentStatusBadge } from '@/components/payments/payment-status-badge';
 import { isTimeoutError } from '@/lib/auth-client';
 import { useRequireAuth } from '@/lib/auth-guard';
 import { useBusinessSettings } from '@/components/business/business-settings-provider';
@@ -226,6 +228,7 @@ export default function OrderDetailPage() {
                     {order.orderNumber}
                   </h1>
                   <OrderStatusBadge status={order.status} />
+                  <PaymentStatusBadge status={order.paymentStatus} />
                 </div>
                 <p className="mt-2 text-sm text-body">
                   {orderSourceLabel(order.source)} · Placed{' '}
@@ -360,6 +363,18 @@ export default function OrderDetailPage() {
                     </Card>
                   </section>
 
+                  <OrderPaymentsSection
+                    onActionError={(message) => setActionError(message)}
+                    onNotice={(message, tone) => setNotice({ message, tone })}
+                    onOrderUpdated={(updated, message) => {
+                      setOrder(updated);
+                      setActionError(null);
+                      setNotice({ message, tone: 'success' });
+                    }}
+                    onRefresh={reload}
+                    order={order}
+                  />
+
                   <section aria-labelledby="timeline-title" className="grid gap-4">
                     <div>
                       <h2 className="text-xl font-semibold text-ink" id="timeline-title">
@@ -443,6 +458,14 @@ export default function OrderDetailPage() {
                           {formatMoney(order.dueAmount, currency)}
                         </dd>
                       </div>
+                      {order.refundOwed > 0 && (
+                        <div className="flex items-center justify-between gap-3 border-t border-border pt-3 text-danger">
+                          <dt className="font-semibold">Refund owed</dt>
+                          <dd className="font-mono font-semibold">
+                            {formatMoney(order.refundOwed, currency)}
+                          </dd>
+                        </div>
+                      )}
                     </dl>
                   </Card>
 

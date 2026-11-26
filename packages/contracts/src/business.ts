@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TeamRoleEnum } from './team.js';
 
 export const CurrencyEnum = z.enum(['BDT', 'USD', 'EUR', 'GBP']);
 
@@ -149,6 +150,8 @@ export const BusinessResponseSchema = z.object({
     logoUrl: z.string().url().nullable(),
     address: AddressSchema.nullable(),
     onboardingComplete: z.boolean(),
+    /** Present on GET /me from the live database membership check. */
+    role: TeamRoleEnum.optional(),
     /**
      * Present on GET /me and GET /onboarding. Absent from the payload shape of
      * the write routes, so it stays optional; null once onboarding completes.

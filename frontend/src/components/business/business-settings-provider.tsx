@@ -8,7 +8,7 @@ import {
   useMemo,
   useSyncExternalStore,
 } from 'react';
-import { CurrencyEnum, TimezoneSchema } from '@f-commerce/contracts';
+import { CurrencyEnum, TeamRoleEnum, TimezoneSchema, type TeamRole } from '@f-commerce/contracts';
 import { apiFetch, getAuth, subscribeToAuth } from '@/lib/auth-client';
 import {
   normalizeLogoUrl,
@@ -36,6 +36,8 @@ export interface BusinessSettingsInput {
 interface BusinessSettingsSnapshot extends BusinessSettings {
   /** The business these settings belong to, or `''` when signed out. */
   businessId: string;
+  /** Database-verified active role from GET /api/business/me, never stored in localStorage. */
+  role: TeamRole | null;
   /** False on the server and the hydration render, true once client storage is read. */
   mounted: boolean;
 }
@@ -58,6 +60,7 @@ const FALLBACK_SETTINGS: BusinessSettings = {
 const SERVER_SNAPSHOT: BusinessSettingsSnapshot = {
   ...FALLBACK_SETTINGS,
   businessId: '',
+  role: null,
   mounted: false,
 };
 
@@ -65,14 +68,20 @@ const SERVER_SNAPSHOT: BusinessSettingsSnapshot = {
  * Settings fetched or saved during this app load. It wins over the cache while
  * it belongs to the active business; a sign out or a business switch drops it.
  */
-let liveSnapshot: (BusinessSettings & { businessId: string }) | null = null;
+let liveSnapshot: (BusinessSettings & { businessId: string; role: TeamRole | null }) | null = null;
 let snapshot: BusinessSettingsSnapshot = SERVER_SNAPSHOT;
 let snapshotKey = '';
 
 const listeners = new Set<() => void>();
 
-function settingsKey(settings: BusinessSettings): string {
-  return JSON.stringify([settings.currency, settings.timezone, settings.name, settings.logoUrl]);
+function settingsKey(settings: BusinessSettings, role: TeamRole | null): string {
+  return JSON.stringify([
+    settings.currency,
+    settings.timezone,
+    settings.name,
+    settings.logoUrl,
+    role,
+  ]);
 }
 
 function emit(): void {
@@ -93,14 +102,14 @@ function pruneLiveSnapshot(businessId: string): void {
 
 function computeSnapshot(): BusinessSettingsSnapshot {
   const auth = getAuth();
-  if (!auth) return { ...FALLBACK_SETTINGS, businessId: '', mounted: true };
+  if (!auth) return { ...FALLBACK_SETTINGS, businessId: '', role: null, mounted: true };
 
   pruneLiveSnapshot(auth.businessId);
 
-  const base =
-    liveSnapshot && liveSnapshot.businessId === auth.businessId
-      ? liveSnapshot
-      : (readBusinessSettingsCache(auth.businessId) ?? FALLBACK_SETTINGS);
+  const hasLive = liveSnapshot !== null && liveSnapshot.businessId === auth.businessId;
+  const base = hasLive
+    ? liveSnapshot!
+    : (readBusinessSettingsCache(auth.businessId) ?? FALLBACK_SETTINGS);
 
   return {
     currency: base.currency,
@@ -108,6 +117,7 @@ function computeSnapshot(): BusinessSettingsSnapshot {
     name: base.name ?? '',
     logoUrl: base.logoUrl ?? null,
     businessId: auth.businessId,
+    role: hasLive ? liveSnapshot!.role : null,
     mounted: true,
   };
 }
@@ -116,7 +126,7 @@ function getSnapshot(): BusinessSettingsSnapshot {
   if (typeof window === 'undefined') return SERVER_SNAPSHOT;
 
   const next = computeSnapshot();
-  const nextKey = `${next.businessId}|${next.currency}|${next.timezone}|${next.name}|${next.logoUrl ?? ''}|${next.mounted}`;
+  const nextKey = `${next.businessId}|${next.currency}|${next.timezone}|${next.name}|${next.logoUrl ?? ''}|${next.role ?? ''}|${next.mounted}`;
   if (nextKey !== snapshotKey) {
     snapshotKey = nextKey;
     snapshot = next;
@@ -129,7 +139,9 @@ function getServerSnapshot(): BusinessSettingsSnapshot {
 }
 
 /** Read the profile fields the shell needs without trusting the rest. */
-function settingsFromProfile(payload: unknown): BusinessSettings | null {
+function settingsFromProfile(
+  payload: unknown,
+): (BusinessSettings & { role: TeamRole | null }) | null {
   if (!payload || typeof payload !== 'object') return null;
 
   const data = (payload as { data?: unknown }).data;
@@ -138,6 +150,7 @@ function settingsFromProfile(payload: unknown): BusinessSettings | null {
   const record = data as Record<string, unknown>;
   const currency = CurrencyEnum.safeParse(record.currency);
   const timezone = TimezoneSchema.safeParse(record.timezone);
+  const role = TeamRoleEnum.safeParse(record.role);
   const name = typeof record.name === 'string' ? record.name.trim() : '';
 
   return {
@@ -145,12 +158,17 @@ function settingsFromProfile(payload: unknown): BusinessSettings | null {
     timezone: timezone.success ? timezone.data : DEFAULT_TIME_ZONE,
     name,
     logoUrl: normalizeLogoUrl(record.logoUrl),
+    role: role.success ? role.data : null,
   };
 }
 
-/** Persist one business's settings and notify every consumer. */
-function commitSettings(businessId: string, settings: BusinessSettings): void {
-  liveSnapshot = { businessId, ...settings };
+/** Persist one business's settings and notify every consumer. Role stays in memory only. */
+function commitSettings(
+  businessId: string,
+  settings: BusinessSettings,
+  role: TeamRole | null,
+): void {
+  liveSnapshot = { businessId, ...settings, role };
   writeBusinessSettingsCache(businessId, settings);
   emit();
 }
@@ -230,9 +248,13 @@ export function BusinessSettingsProvider({ children }: { children: React.ReactNo
           // A sign out or a switch while the request was in flight must win.
           const active = getAuth();
           if (!active || active.businessId !== targetBusinessId) return;
-          if (settingsKey(next) === settingsKey(getSnapshot())) return;
+          const currentSnap = getSnapshot();
+          const { role, ...profileSettings } = next;
+          if (settingsKey(profileSettings, role) === settingsKey(currentSnap, currentSnap.role)) {
+            return;
+          }
 
-          commitSettings(targetBusinessId, next);
+          commitSettings(targetBusinessId, profileSettings, role);
         })
         .catch(() => {
           // Keep the cache or the fallback; the page handles its own errors.
@@ -253,7 +275,11 @@ export function BusinessSettingsProvider({ children }: { children: React.ReactNo
     // A sign out or a switch while the save was in flight must win.
     if (!auth || auth.businessId !== targetBusinessId) return;
     // Validate at the write path so every caller is protected, not each call site.
-    commitSettings(targetBusinessId, sanitizeSettings(next, getSnapshot()));
+    const currentRole =
+      liveSnapshot !== null && liveSnapshot.businessId === targetBusinessId
+        ? liveSnapshot.role
+        : null;
+    commitSettings(targetBusinessId, sanitizeSettings(next, getSnapshot()), currentRole);
   }, []);
 
   const value = useMemo<BusinessSettingsContextValue>(
@@ -263,6 +289,7 @@ export function BusinessSettingsProvider({ children }: { children: React.ReactNo
       name: current.name,
       logoUrl: current.logoUrl,
       businessId: current.businessId,
+      role: current.role,
       mounted: current.mounted,
       updateSettings,
     }),
@@ -272,6 +299,7 @@ export function BusinessSettingsProvider({ children }: { children: React.ReactNo
       current.logoUrl,
       current.mounted,
       current.name,
+      current.role,
       current.timezone,
       updateSettings,
     ],

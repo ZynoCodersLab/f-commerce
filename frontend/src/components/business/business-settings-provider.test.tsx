@@ -12,6 +12,11 @@ function Consumer() {
   return <p data-testid="settings">{`${currency}|${timezone}|${mounted}`}</p>;
 }
 
+function RoleConsumer() {
+  const { role, currency } = useBusinessSettings();
+  return <p data-testid="role-state">{`${role ?? 'none'}|${currency}`}</p>;
+}
+
 function IdentityConsumer() {
   const { name, logoUrl } = useBusinessSettings();
   return <p data-testid="identity">{`${name}|${logoUrl ?? ''}`}</p>;
@@ -450,5 +455,69 @@ describe('BusinessSettingsProvider', () => {
 
     expect(screen.getByTestId('settings')).toHaveTextContent('|Asia/Dhaka|true');
     expect(window.localStorage.getItem(businessSettingsCacheKey('biz-late-signout'))).toBeNull();
+  });
+
+  // covers AC-16: live role comes only from /api/business/me, never from localStorage.
+  it('exposes live role in memory without writing it to localStorage, preserves it across settings saves, and clears it on switch or sign out', async () => {
+    setAuth({ accessToken: 'tok', businessId: 'biz-role-a' });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            name: 'Role Biz A',
+            logoUrl: null,
+            currency: 'BDT',
+            timezone: 'Asia/Dhaka',
+            role: 'OWNER',
+          },
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            name: 'Role Biz B',
+            logoUrl: null,
+            currency: 'USD',
+            timezone: 'America/New_York',
+            role: 'STAFF',
+          },
+        }),
+      } as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <BusinessSettingsProvider>
+        <RoleConsumer />
+        <SettingsWriter
+          next={{ currency: 'EUR', timezone: 'Europe/Paris' }}
+          businessId="biz-role-a"
+        />
+      </BusinessSettingsProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('role-state')).toHaveTextContent('OWNER|BDT'));
+    const cached = window.localStorage.getItem(businessSettingsCacheKey('biz-role-a'));
+    expect(cached).not.toBeNull();
+    expect(cached).not.toContain('role');
+    expect(cached).not.toContain('OWNER');
+
+    // Settings update preserves the live role.
+    act(() => {
+      screen.getByRole('button', { name: /write settings/i }).click();
+    });
+    expect(screen.getByTestId('role-state')).toHaveTextContent('OWNER|EUR');
+
+    // Switching business resets role until the new profile responds.
+    act(() => setAuth({ accessToken: 'tok', businessId: 'biz-role-b' }));
+    await waitFor(() => expect(screen.getByTestId('role-state')).toHaveTextContent('STAFF|USD'));
+
+    // Sign out clears role to null.
+    act(() => clearAuth());
+    expect(screen.getByTestId('role-state')).toHaveTextContent('none|');
   });
 });

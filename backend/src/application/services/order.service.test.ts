@@ -53,6 +53,7 @@ function detail(status: OrderStatus, items: OrderItem[]): OrderDetail {
     },
     items,
     history: [],
+    payments: [],
   } as unknown as OrderDetail;
 }
 

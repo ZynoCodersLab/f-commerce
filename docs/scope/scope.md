@@ -10,31 +10,31 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 
 ## At a glance
 
-| #   | Feature                           | Phase      | Status  |
-| --- | --------------------------------- | ---------- | ------- |
-| 1   | Stack & architecture              | Foundation | done    |
-| 2   | Data model                        | Foundation | done    |
-| 3   | Coding standards & tooling        | Foundation | done    |
-| 4   | Design system & UI foundation     | Foundation | done    |
-| 5   | Authentication & tenant isolation | Slice 1    | done    |
-| 6   | Business profile & onboarding     | Slice 1    | done    |
-| 7   | Customers                         | Slice 1    | done    |
-| 8   | Products & categories             | Slice 2    | done    |
-| 9   | Orders (CRUD + status workflow)   | Slice 2    | done    |
-| 10  | Payments                          | Slice 2    | planned |
-| 11  | Inventory management              | Slice 4    | planned |
-| 12  | Delivery & shipping               | Slice 4    | planned |
-| 13  | Expenses & profit calculation     | Slice 4    | planned |
-| 14  | Dashboard                         | Slice 4    | planned |
-| 15  | Reports                           | Slice 5    | planned |
-| 16  | Search & filters                  | Slice 5    | planned |
-| 17  | Notifications                     | Slice 5    | planned |
-| 18  | Invoice generation                | Slice 5    | planned |
-| 19  | OAuth provider login              | Slice 3    | planned |
-| 20  | Marketing site                    | Launch     | planned |
-| 21  | Product variant archiving         | Slice 2    | planned |
-| 22  | Business timezone                 | Slice 1    | done    |
-| 23  | Team & staff invites              | Slice 1    | done    |
+| #   | Feature                           | Phase      | Status      |
+| --- | --------------------------------- | ---------- | ----------- |
+| 1   | Stack & architecture              | Foundation | done        |
+| 2   | Data model                        | Foundation | done        |
+| 3   | Coding standards & tooling        | Foundation | done        |
+| 4   | Design system & UI foundation     | Foundation | done        |
+| 5   | Authentication & tenant isolation | Slice 1    | done        |
+| 6   | Business profile & onboarding     | Slice 1    | done        |
+| 7   | Customers                         | Slice 1    | done        |
+| 8   | Products & categories             | Slice 2    | done        |
+| 9   | Orders (CRUD + status workflow)   | Slice 2    | done        |
+| 10  | Payments                          | Slice 2    | in-progress |
+| 11  | Inventory management              | Slice 4    | planned     |
+| 12  | Delivery & shipping               | Slice 4    | planned     |
+| 13  | Expenses & profit calculation     | Slice 4    | planned     |
+| 14  | Dashboard                         | Slice 4    | planned     |
+| 15  | Reports                           | Slice 5    | planned     |
+| 16  | Search & filters                  | Slice 5    | planned     |
+| 17  | Notifications                     | Slice 5    | planned     |
+| 18  | Invoice generation                | Slice 5    | planned     |
+| 19  | OAuth provider login              | Slice 3    | planned     |
+| 20  | Marketing site                    | Launch     | planned     |
+| 21  | Product variant archiving         | Slice 2    | planned     |
+| 22  | Business timezone                 | Slice 1    | done        |
+| 23  | Team & staff invites              | Slice 1    | done        |
 
 ## Foundations
 
@@ -218,12 +218,24 @@ Order creation from customer/product selection, status states, order history, so
 - [x] Review it (fresh model): `/check review orders` — See [2026-10-24-feat-orders.md](../reviews/2026-10-24-feat-orders.md)
 - [x] Document it: `/document orders` — See [2026-10-25-feat-orders.md](../PRs/2026-10-25-feat-orders.md)
 
-### 10. Payments · needs a decision
+### 10. Payments · in-progress
 
 Payment methods (cash, cash on delivery, bKash, Nagad, bank transfer, debit or credit card, PayPal, and other; bKash and Nagad are Bangladesh only), partial and full payments, due tracking, payment records. Order creation also captures the first payment and its method, so the money taken at the sale is recorded against the order it pays for.
 **Done when:** user can capture a first payment and its method while creating an order, add later payments against the same order, and see the correct paid and due amounts.
 
-- [ ] Design it (spec): `/architect payments`
+- [x] Design it (spec): `/architect payments`
+      Spec [0010](../specs/0010-payments/index.md)
+- [x] Build it: `/develop payments` (branch `feat/payments`, [spec](../specs/0010-payments/index.md), [verify](../specs/0010-payments/verify.md))
+  - [x] Thin payment thread: contracts, three step migration, domain balance, record payment API, and order detail Payments section (AC-3, AC-4, AC-7, AC-11, AC-12, AC-13, AC-14, AC-15, AC-22)
+  - [x] First payment at order create: initial payment contract, validation before duplicate check, and Payment received form section (AC-1, AC-2, AC-18)
+  - [x] Refunds, voids, live role, and closing: live role on business profile, owner only refund and void endpoints and dialogs, locked edit and status transactions (AC-5, AC-6, AC-8, AC-9, AC-16, AC-19)
+  - [x] Order list payment filter and business wide ledger: derived payment status SQL filter, `/orders` badge and filter, `GET /api/payments`, `/payments` screen, and nav link (AC-10, AC-17, AC-20, AC-21)
+  - [x] Harden and test: concurrency, idempotency, role and tenant matrix, migration backfill, accessibility, and full test matrix (AC-1 to AC-22)
+        Code in `packages/contracts/src/payment.ts`, `backend/src/domain/order-payments.ts`, `backend/src/application/services/payment.service.ts`, `backend/src/presentation/controllers/payment.controller.ts`, `frontend/src/components/payments/`, `frontend/src/app/payments/page.tsx`
+- [ ] Verify it: `/check verify payments`
+- [ ] Test it: `/test payments`
+- [ ] Review it (fresh model): `/check review payments`
+- [ ] Document it: `/document payments`
 
 ### 21. Product variant archiving · needs a decision
 
@@ -340,6 +352,7 @@ Heads up: the backend scaffold smoke test currently times out while waiting for 
 Out of scope for the current build pass, kept so the plan stays honest.
 
 - **Subscription billing**: integrate Stripe/checkout once MVP proves fit
+- **Online payment collection (from spec 0010)**: online payment links through bKash, SSLCommerz, or Stripe for buyers to pay orders directly, deferred until the manual ledger proves fit; when added, it should write ledger entries through the same domain rules
 - **Courier API integrations**: live tracking once core workflow is stable
 - **Social channel APIs**: Facebook/WhatsApp order import via future integrations
 - **Advanced analytics**: AI insights after basic reporting works

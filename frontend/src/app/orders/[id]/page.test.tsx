@@ -41,6 +41,8 @@ function makeOrder(overrides: Partial<OrderDto> = {}): OrderDto {
     total: 7550,
     paidAmount: 0,
     dueAmount: 7550,
+    refundOwed: 0,
+    paymentStatus: 'UNPAID',
     version: 1,
     createdAt: created,
     updatedAt: created,
@@ -68,6 +70,7 @@ function makeOrder(overrides: Partial<OrderDto> = {}): OrderDto {
         createdAt: created,
       },
     ],
+    payments: [],
     ...overrides,
   };
 }
@@ -527,5 +530,265 @@ describe('OrderDetailPage', () => {
     ).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Edit order' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Confirm order' })).not.toBeInTheDocument();
+  });
+
+  // covers AC-16, AC-19: OWNER records payment, records refund (prefilled on closed, blank on active), and voids live entries.
+  it('lets OWNER record a payment, record a refund, and void an entry with a reason', async () => {
+    const user = userEvent.setup();
+    const paymentEntry = {
+      id: 'pay-1',
+      kind: 'PAYMENT' as const,
+      amount: 3000,
+      method: 'BKASH' as const,
+      paymentDate: '2026-10-20',
+      referenceNumber: 'TRX-1',
+      notes: null,
+      recordedByName: 'Maya Owner',
+      voidedAt: null,
+      voidedByName: null,
+      voidReason: null,
+      createdAt: created,
+    };
+    const afterPayment = makeOrder({
+      paidAmount: 3000,
+      dueAmount: 4550,
+      paymentStatus: 'PARTIAL',
+      payments: [paymentEntry],
+    });
+    const afterRefund = makeOrder({
+      paidAmount: 2000,
+      dueAmount: 5550,
+      paymentStatus: 'PARTIAL',
+      payments: [
+        paymentEntry,
+        {
+          ...paymentEntry,
+          id: 'pay-2',
+          kind: 'REFUND',
+          amount: 1000,
+          method: 'CASH',
+          referenceNumber: null,
+        },
+      ],
+    });
+    const afterVoid = makeOrder({
+      paidAmount: 3000,
+      dueAmount: 4550,
+      paymentStatus: 'PARTIAL',
+      payments: [
+        paymentEntry,
+        {
+          ...afterRefund.payments[1],
+          voidedAt: updated,
+          voidedByName: 'Maya Owner',
+          voidReason: 'Mistaken refund',
+        },
+      ],
+    });
+
+    const fetchMock = installedFetch((url, init) => {
+      if (url === '/api/business/me') {
+        return jsonResponse(200, { success: true, data: { currency: 'BDT', role: 'OWNER' } });
+      }
+      if (url === '/api/orders/order-1/payments' && init?.method === 'POST') {
+        return jsonResponse(201, { success: true, data: afterPayment });
+      }
+      if (url === '/api/orders/order-1/refunds' && init?.method === 'POST') {
+        return jsonResponse(201, { success: true, data: afterRefund });
+      }
+      if (url === '/api/orders/order-1/payments/pay-2/void' && init?.method === 'POST') {
+        return jsonResponse(200, { success: true, data: afterVoid });
+      }
+      if (url === '/api/orders/order-1') {
+        return jsonResponse(200, { success: true, data: makeOrder() });
+      }
+      return undefined;
+    });
+
+    renderPage();
+    await screen.findByRole('heading', { name: 'ORD-0001' });
+
+    // 1. Record payment
+    await user.click(screen.getByRole('button', { name: 'Record payment' }));
+    const payDialog = await screen.findByRole('dialog', { name: 'Record payment' });
+    const amountInput = within(payDialog).getByLabelText('Amount');
+    expect(amountInput).toHaveValue(7550);
+    await user.clear(amountInput);
+    await user.type(amountInput, '3000');
+    await user.click(within(payDialog).getByRole('button', { name: 'Save payment' }));
+
+    expect(await screen.findByText('Payment recorded.')).toBeVisible();
+    const payCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        String(input) === '/api/orders/order-1/payments' &&
+        (init as RequestInit | undefined)?.method === 'POST',
+    );
+    expect(new Headers((payCall?.[1] as RequestInit).headers).get('Idempotency-Key')).toBeTruthy();
+
+    // 2. Record refund on active order starts with a blank amount.
+    await user.click(await screen.findByRole('button', { name: 'Record refund' }));
+    const refundDialog = await screen.findByRole('dialog', { name: 'Record refund' });
+    const refundAmount = within(refundDialog).getByLabelText('Amount');
+    expect(refundAmount).toHaveValue(null);
+    await user.type(refundAmount, '1000');
+    await user.click(within(refundDialog).getByRole('button', { name: 'Save refund' }));
+
+    expect(await screen.findByText('Refund recorded.')).toBeVisible();
+
+    // 3. Void the refund with a reason.
+    await user.click(screen.getByRole('button', { name: /Void refund of 1,000 BDT/i }));
+    const voidDialog = await screen.findByRole('dialog', { name: 'Void this refund?' });
+    await user.type(within(voidDialog).getByLabelText('Reason'), 'Mistaken refund');
+    await user.click(within(voidDialog).getByRole('button', { name: 'Void entry' }));
+
+    expect(await screen.findByText('Entry voided.')).toBeVisible();
+    expect(screen.getByText(/Voided by Maya Owner: Mistaken refund/)).toBeVisible();
+  });
+
+  // covers AC-16, AC-19: STAFF cannot see Record refund or Void, and closed order prefills refundOwed for OWNER.
+  it('hides refund and void controls from STAFF while keeping Record payment', async () => {
+    const partialOrder = makeOrder({
+      paidAmount: 2000,
+      dueAmount: 5550,
+      paymentStatus: 'PARTIAL',
+      payments: [
+        {
+          id: 'pay-1',
+          kind: 'PAYMENT',
+          amount: 2000,
+          method: 'CASH',
+          paymentDate: '2026-10-20',
+          referenceNumber: null,
+          notes: null,
+          recordedByName: 'Sam Staff',
+          voidedAt: null,
+          voidedByName: null,
+          voidReason: null,
+          createdAt: created,
+        },
+      ],
+    });
+
+    installedFetch((url) => {
+      if (url === '/api/business/me') {
+        return jsonResponse(200, { success: true, data: { currency: 'BDT', role: 'STAFF' } });
+      }
+      if (url === '/api/orders/order-1') {
+        return jsonResponse(200, { success: true, data: partialOrder });
+      }
+      return undefined;
+    });
+
+    renderPage();
+    await screen.findByRole('heading', { name: 'ORD-0001' });
+
+    expect(screen.getByRole('button', { name: 'Record payment' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Record refund' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Void/ })).not.toBeInTheDocument();
+  });
+
+  // covers AC-19: closed order prefills refundOwed; 409 conflict rules close vs keep dialogs open; TOTAL_BELOW_PAID stays in edit mode.
+  it('prefills refundOwed on closed orders, applies 409 dialog rules, and keeps edit form open on TOTAL_BELOW_PAID', async () => {
+    const user = userEvent.setup();
+    const closedOrder = makeOrder({
+      status: 'CANCELLED',
+      paidAmount: 2000,
+      dueAmount: 0,
+      refundOwed: 2000,
+      paymentStatus: 'REFUND_OWED',
+      payments: [
+        {
+          id: 'pay-1',
+          kind: 'PAYMENT',
+          amount: 2000,
+          method: 'CASH',
+          paymentDate: '2026-10-20',
+          referenceNumber: null,
+          notes: null,
+          recordedByName: 'Maya Owner',
+          voidedAt: null,
+          voidedByName: null,
+          voidReason: null,
+          createdAt: created,
+        },
+      ],
+    });
+
+    installedFetch((url, init) => {
+      if (url === '/api/business/me') {
+        return jsonResponse(200, { success: true, data: { currency: 'BDT', role: 'OWNER' } });
+      }
+      if (url === '/api/orders/order-1/refunds' && init?.method === 'POST') {
+        return jsonResponse(409, {
+          error: 'REFUND_EXCEEDS_PAID',
+          message: 'Refund exceeds paid amount',
+          paidAmount: 1000,
+        });
+      }
+      if (url === '/api/orders/order-1/payments/pay-1/void' && init?.method === 'POST') {
+        return jsonResponse(409, {
+          error: 'PAYMENT_ALREADY_VOIDED',
+          message: 'Payment is already voided.',
+        });
+      }
+      if (url === '/api/orders/order-1') {
+        return jsonResponse(200, { success: true, data: closedOrder });
+      }
+      return undefined;
+    });
+
+    renderPage();
+    await screen.findByRole('heading', { name: 'ORD-0001' });
+
+    // Closed order prefills refundOwed (2000); REFUND_EXCEEDS_PAID keeps dialog open with refreshed amount.
+    await user.click(await screen.findByRole('button', { name: 'Record refund' }));
+    const refundDialog = await screen.findByRole('dialog', { name: 'Record refund' });
+    expect(within(refundDialog).getByLabelText('Amount')).toHaveValue(2000);
+    await user.click(within(refundDialog).getByRole('button', { name: 'Save refund' }));
+
+    expect(await within(refundDialog).findByText(/Current paid amount is 1,000 BDT/)).toBeVisible();
+    await user.click(within(refundDialog).getByRole('button', { name: 'Cancel' }));
+
+    // PAYMENT_ALREADY_VOIDED closes void dialog and surfaces page error.
+    await user.click(screen.getByRole('button', { name: /Void payment of 2,000 BDT/i }));
+    const voidDialog = await screen.findByRole('dialog', { name: 'Void this payment?' });
+    await user.type(within(voidDialog).getByLabelText('Reason'), 'Already gone');
+    await user.click(within(voidDialog).getByRole('button', { name: 'Void entry' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(await screen.findByText('Payment is already voided.')).toBeVisible();
+  });
+
+  it('keeps the edit form open and explains when PATCH hits 409 TOTAL_BELOW_PAID', async () => {
+    const user = userEvent.setup();
+    installedFetch((url, init) => {
+      if (url === '/api/orders/order-1' && init?.method === 'PATCH') {
+        return jsonResponse(409, {
+          error: 'TOTAL_BELOW_PAID',
+          message: 'Order total cannot be lower than paid amount.',
+          paidAmount: 5000,
+        });
+      }
+      if (url === '/api/orders/order-1') {
+        return jsonResponse(200, {
+          success: true,
+          data: makeOrder({ paidAmount: 5000, dueAmount: 2550, paymentStatus: 'PARTIAL' }),
+        });
+      }
+      return metadata(url);
+    });
+
+    renderPage();
+    await screen.findByRole('heading', { name: 'ORD-0001' });
+
+    await user.click(screen.getByRole('button', { name: 'Edit order' }));
+    expect(await screen.findByRole('heading', { name: 'Edit ORD-0001' })).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(
+      await screen.findByText(/Refund or void payments before lowering the order total/),
+    ).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Edit ORD-0001' })).toBeVisible();
   });
 });

@@ -378,6 +378,8 @@ describe('order response contracts', () => {
       total: 2550,
       paidAmount: 0,
       dueAmount: 2550,
+      refundOwed: 0,
+      paymentStatus: 'UNPAID',
       version: 1,
       createdAt: '2026-10-20T10:00:00.000Z',
       updatedAt: '2026-10-20T10:00:00.000Z',
@@ -405,11 +407,13 @@ describe('order response contracts', () => {
           createdAt: '2026-10-20T10:00:00.000Z',
         },
       ],
+      payments: [],
     });
 
     expect(parsed.orderNumber).toBe('ORD-0001');
     expect(parsed.items).toHaveLength(1);
     expect(parsed.history[0].fromStatus).toBeNull();
+    expect(parsed.payments).toEqual([]);
   });
 
   it('parses a list page with and without a next cursor', () => {
@@ -419,7 +423,10 @@ describe('order response contracts', () => {
       status: 'PENDING',
       customerName: 'Nusrat Jahan',
       total: 2550,
+      paidAmount: 0,
       dueAmount: 2550,
+      refundOwed: 0,
+      paymentStatus: 'UNPAID',
       source: null,
       deliveryDeadline: null,
       itemCount: 1,
@@ -440,7 +447,10 @@ describe('order response contracts', () => {
       status: 'PENDING',
       customerName: 'Nusrat Jahan',
       total: 2550,
+      paidAmount: 0,
       dueAmount: 2550,
+      refundOwed: 0,
+      paymentStatus: 'UNPAID',
       source: null,
       deliveryDeadline: null,
       itemCount: 1,

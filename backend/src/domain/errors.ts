@@ -292,3 +292,62 @@ export class TeamMemberNotFoundError extends NotFoundError {
     super(message);
   }
 }
+
+// --- Payment errors ---
+
+export class OrderClosedError extends ConflictError {
+  constructor(message: string = 'Cannot record a payment on a cancelled or returned order') {
+    super(message);
+  }
+}
+
+export class PaymentExceedsDueError extends ConflictError {
+  constructor(
+    public readonly dueAmount: number,
+    message: string = 'Payment amount exceeds the remaining due amount',
+  ) {
+    super(message);
+  }
+}
+
+export class RefundExceedsPaidError extends ConflictError {
+  constructor(
+    public readonly paidAmount: number,
+    message: string = 'Refund amount exceeds the paid amount',
+  ) {
+    super(message);
+  }
+}
+
+export class PaymentAlreadyVoidedError extends ConflictError {
+  constructor(message: string = 'This payment entry is already voided') {
+    super(message);
+  }
+}
+
+export class VoidBreaksBalanceError extends ConflictError {
+  constructor(
+    public readonly paidAmount: number,
+    public readonly total: number,
+    message: string = 'Voiding this entry would leave the order balance invalid',
+  ) {
+    super(message);
+  }
+}
+
+export class TotalBelowPaidError extends ConflictError {
+  constructor(
+    public readonly paidAmount: number,
+    message: string = 'Order total cannot be lower than the amount already paid. Record a refund or void a payment first',
+  ) {
+    super(message);
+  }
+}
+
+export class IdempotencyKeyConflictError extends ConflictError {
+  constructor(
+    message: string = 'This Idempotency-Key was already used for a different payment request',
+  ) {
+    super(message);
+  }
+}

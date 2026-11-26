@@ -314,4 +314,32 @@ describe('AppShell business day', () => {
       }),
     ).toBeVisible();
   });
+
+  // covers AC-21: Payments appears in desktop sidebar and mobile More sheet while bottom nav stays 5 slots.
+  it('places Payments in the desktop sidebar and mobile More sheet while keeping the bottom bar at 5 slots', async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    const sidebarNav = within(screen.getByRole('complementary', { name: 'Sidebar' })).getByRole(
+      'navigation',
+      { name: 'Primary navigation' },
+    );
+    expect(within(sidebarNav).getByRole('link', { name: 'Payments' })).toHaveAttribute(
+      'href',
+      '/payments',
+    );
+
+    const mobileNav = screen.getByRole('navigation', { name: 'Mobile navigation' });
+    const mobileLinks = within(mobileNav).getAllByRole('link');
+    const mobileButtons = within(mobileNav).getAllByRole('button');
+    expect(mobileLinks.length + mobileButtons.length).toBe(5);
+    expect(within(mobileNav).queryByRole('link', { name: 'Payments' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: /open navigation/i }));
+    const sheet = screen.getByRole('dialog', { name: /more/i });
+    expect(within(sheet).getByRole('link', { name: 'Payments' })).toHaveAttribute(
+      'href',
+      '/payments',
+    );
+  });
 });

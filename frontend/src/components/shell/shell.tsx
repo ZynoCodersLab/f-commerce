@@ -14,6 +14,7 @@ import {
   Store,
   Users,
   UsersRound,
+  Wallet,
 } from 'lucide-react';
 import Image from 'next/image';
 import NextLink from 'next/link';
@@ -46,7 +47,13 @@ const routes: RouteItem[] = [
   { href: '/products', label: 'Products', icon: Package },
 ];
 
+const paymentsRoute: RouteItem = { href: '/payments', label: 'Payments', icon: Wallet };
+
+/** Desktop sidebar shows Payments directly; phone bottom bar stays at 5 slots (4 + More). */
+const desktopRoutes: RouteItem[] = [...routes, paymentsRoute];
+
 const secondaryRoutes: RouteItem[] = [
+  paymentsRoute,
   { href: '/settings', label: 'Settings', icon: Settings },
   { href: '/settings/team', label: 'Team', icon: UsersRound },
 ];
@@ -194,7 +201,7 @@ function BusinessLogo({ logoUrl, name }: { logoUrl: string | null; name: string 
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const currentHref = activeHref(pathname, routes);
+  const currentHref = activeHref(pathname, desktopRoutes);
   const router = useRouter();
   const [moreOpen, setMoreOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -230,7 +237,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
         <nav aria-label="Primary navigation" className="grid gap-1">
-          {routes.map((item) => (
+          {desktopRoutes.map((item) => (
             <RouteLink active={currentHref === item.href} item={item} key={item.href} />
           ))}
           <button

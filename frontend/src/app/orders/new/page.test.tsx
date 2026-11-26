@@ -74,6 +74,8 @@ function makeOrder(overrides: Partial<OrderDto> = {}): OrderDto {
     total: 5050,
     paidAmount: 0,
     dueAmount: 5050,
+    refundOwed: 0,
+    paymentStatus: 'UNPAID',
     version: 1,
     createdAt: created,
     updatedAt: created,
@@ -101,6 +103,7 @@ function makeOrder(overrides: Partial<OrderDto> = {}): OrderDto {
         createdAt: created,
       },
     ],
+    payments: [],
     ...overrides,
   };
 }
@@ -401,5 +404,142 @@ describe('NewOrderPage', () => {
           String(input) === '/api/orders' && (init as RequestInit | undefined)?.method === 'POST',
       ),
     ).toBe(false);
+  });
+
+  // covers AC-1, AC-18: first payment at create fills full amount, validates against live total, and submits initialPayment.
+  it('fills full amount, updates method labels/warnings, blocks amounts above total, and submits initialPayment', async () => {
+    const user = userEvent.setup();
+    const fetchMock = installedFetch((url, init) => {
+      if (url === '/api/orders' && init?.method === 'POST') {
+        return jsonResponse(201, {
+          success: true,
+          data: makeOrder({ paidAmount: 2500, dueAmount: 0 }),
+        });
+      }
+      if (url.startsWith('/api/customers?')) {
+        return jsonResponse(200, { success: true, data: { items: [customer], nextCursor: null } });
+      }
+      if (url.startsWith('/api/products?')) {
+        return jsonResponse(200, { success: true, data: { items: [product], nextCursor: null } });
+      }
+      return metadata(url);
+    });
+
+    renderPage();
+    await screen.findByRole('heading', { name: 'Create order' });
+    await chooseCustomerAndProduct(user);
+
+    // Amount above the 2500 total shows an inline error and blocks save.
+    const amountField = screen.getByLabelText('Amount received');
+    await user.type(amountField, '3000');
+    await user.click(screen.getByRole('button', { name: 'Create order' }));
+
+    expect(
+      await screen.findByText(/Amount cannot exceed the live total of 2,500 BDT/),
+    ).toBeVisible();
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          String(input) === '/api/orders' && (init as RequestInit | undefined)?.method === 'POST',
+      ),
+    ).toBe(false);
+
+    // Full amount button sets 2500.
+    await user.click(screen.getByRole('button', { name: 'Full amount' }));
+    expect(amountField).toHaveValue(2500);
+
+    // Method switches reference label and shows card reminder.
+    const methodSelect = screen.getByLabelText('Payment method');
+    await user.selectOptions(methodSelect, 'BKASH');
+    expect(screen.getByLabelText('Transaction ID (optional)')).toBeVisible();
+
+    await user.selectOptions(methodSelect, 'CARD');
+    expect(screen.getByText(/Never enter a full card number/)).toBeVisible();
+
+    await user.selectOptions(methodSelect, 'CASH_ON_DELIVERY');
+    await user.type(screen.getByLabelText('Reference (optional)'), 'COD-1');
+    await user.click(screen.getByRole('button', { name: 'Create order' }));
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/orders/order-1'));
+    const postCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        String(input) === '/api/orders' && (init as RequestInit | undefined)?.method === 'POST',
+    );
+    expect(JSON.parse(String((postCall?.[1] as RequestInit).body))).toMatchObject({
+      initialPayment: {
+        amount: 2500,
+        method: 'CASH_ON_DELIVERY',
+        referenceNumber: 'COD-1',
+        notes: null,
+      },
+    });
+  });
+
+  // covers AC-13, AC-18: hides bKash/Nagad for non-BDT businesses and preserves initialPayment on duplicate confirm.
+  it('hides Bangladesh mobile methods for USD businesses and keeps initialPayment when confirming a duplicate', async () => {
+    const user = userEvent.setup();
+    let posts = 0;
+    const fetchMock = installedFetch((url, init) => {
+      if (url === '/api/business/me') {
+        return jsonResponse(200, {
+          success: true,
+          data: { currency: 'USD', timezone: 'America/New_York' },
+        });
+      }
+      if (url === '/api/orders' && init?.method === 'POST') {
+        posts += 1;
+        if (posts === 1) {
+          return jsonResponse(409, {
+            error: 'DUPLICATE_ORDER',
+            message: 'A matching order already exists.',
+            existingOrder: {
+              id: 'order-9',
+              orderNumber: 'ORD-0009',
+              status: 'PENDING',
+              total: 2500,
+              createdAt: created,
+            },
+          });
+        }
+        return jsonResponse(201, { success: true, data: makeOrder() });
+      }
+      if (url.startsWith('/api/customers?')) {
+        return jsonResponse(200, { success: true, data: { items: [customer], nextCursor: null } });
+      }
+      if (url.startsWith('/api/products?')) {
+        return jsonResponse(200, { success: true, data: { items: [product], nextCursor: null } });
+      }
+      return undefined;
+    });
+
+    renderPage();
+    await screen.findByRole('heading', { name: 'Create order' });
+    await chooseCustomerAndProduct(user);
+
+    const methodSelect = screen.getByLabelText('Payment method');
+    await waitFor(() => {
+      const optionValues = Array.from(methodSelect.querySelectorAll('option')).map((o) =>
+        o.getAttribute('value'),
+      );
+      expect(optionValues).not.toContain('BKASH');
+      expect(optionValues).not.toContain('NAGAD');
+    });
+
+    await user.type(screen.getByLabelText('Amount received'), '500');
+    await user.click(screen.getByRole('button', { name: 'Create order' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'This looks like a duplicate' });
+    await user.click(within(dialog).getByRole('button', { name: 'Create anyway' }));
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/orders/order-1'));
+    const postCalls = fetchMock.mock.calls.filter(
+      ([input, init]) =>
+        String(input) === '/api/orders' && (init as RequestInit | undefined)?.method === 'POST',
+    );
+    expect(postCalls).toHaveLength(2);
+    expect(JSON.parse(String((postCalls[1][1] as RequestInit).body))).toMatchObject({
+      confirmDuplicate: true,
+      initialPayment: expect.objectContaining({ amount: 500, method: 'CASH' }),
+    });
   });
 });

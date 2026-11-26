@@ -11,13 +11,39 @@ export enum PaymentMethod {
   OTHER = 'OTHER',
 }
 
+export enum PaymentKind {
+  PAYMENT = 'PAYMENT',
+  REFUND = 'REFUND',
+}
+
 export interface Payment extends TenantEntity {
   orderId: string;
+  kind: PaymentKind;
   amount: number;
   method: PaymentMethod;
   referenceNumber?: string;
   notes?: string;
-  paymentDate: Date;
+  /** Business calendar day (`YYYY-MM-DD`), never a timestamp. */
+  paymentDate: string;
+  recordedByUserId: string;
+  recordedByName: string;
+  voidedAt?: Date;
+  voidedByUserId?: string;
+  voidedByName?: string;
+  voidReason?: string;
+  idempotencyKey?: string;
+}
+
+/** One entry in the business wide payments ledger, joined to its order summary. */
+export interface PaymentLedgerItem extends Payment {
+  orderNumber: string;
+  customerNameSnapshot: string;
+}
+
+export interface PaymentLedgerSummary {
+  collected: number;
+  refunded: number;
+  net: number;
 }
 
 export interface ExpenseCategory extends TenantEntity {
