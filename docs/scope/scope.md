@@ -232,9 +232,9 @@ Payment methods (cash, cash on delivery, bKash, Nagad, bank transfer, debit or c
   - [x] Order list payment filter and business wide ledger: derived payment status SQL filter, `/orders` badge and filter, `GET /api/payments`, `/payments` screen, and nav link (AC-10, AC-17, AC-20, AC-21)
   - [x] Harden and test: concurrency, idempotency, role and tenant matrix, migration backfill, accessibility, and full test matrix (AC-1 to AC-22)
         Code in `packages/contracts/src/payment.ts`, `backend/src/domain/order-payments.ts`, `backend/src/application/services/payment.service.ts`, `backend/src/presentation/controllers/payment.controller.ts`, `frontend/src/components/payments/`, `frontend/src/app/payments/page.tsx`
-- [ ] Verify it: `/check verify payments`
-- [ ] Test it: `/test payments`
-- [ ] Review it (fresh model): `/check review payments`
+- [x] Verify it: `/check verify payments` · all 22 acceptance criteria and 48 checks verified at runtime on 2026-11-27 against the live frontend proxy, Express API, and PostgreSQL (fresh and seeded migrations with corrupt timezone fallback, live schema checks, 151 contract, 629 backend, and 34 frontend test files, lint, typecheck, format, production build, 20 API checks, and 21 desktop and mobile browser flows). See [verify.md](../specs/0010-payments/verify.md).
+- [x] Test it: `/test payments` · 154 contract, 635 backend, and 416 frontend Vitest tests pass; 6 payments E2E runs pass on desktop and mobile; lint, typecheck, and format checks clean.
+- [x] Review it (fresh model): `/check review payments` · changes requested by MiniMax M2.7 over Gemini 4 Neon on 2026-11-28, one major (cancelled orders show PAID status), see [review](../reviews/2026-11-28-feat-payments.md)
 - [ ] Document it: `/document payments`
 
 ### 21. Product variant archiving · needs a decision
