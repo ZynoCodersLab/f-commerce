@@ -219,4 +219,72 @@ describe('PaymentsPage', () => {
     await user.selectOptions(screen.getByLabelText('Type'), 'REFUND');
     expect(await screen.findByText('No payments match these filters')).toBeVisible();
   });
+
+  // covers spec 0010 AC-17 and AC-21: negative net summary and inverted date range guard with Reset filters
+  it('renders negative net summary and blocks inverted date ranges before calling the API', async () => {
+    const user = userEvent.setup();
+    const requestedUrls: string[] = [];
+
+    installFetch((url) => {
+      if (url === '/api/business/me') {
+        return jsonResponse(200, {
+          success: true,
+          data: {
+            name: 'Maya Traders',
+            currency: 'BDT',
+            timezone: 'Asia/Dhaka',
+            logoUrl: null,
+            address: null,
+            onboardingComplete: true,
+            role: 'OWNER',
+          },
+        });
+      }
+      if (url.startsWith('/api/payments')) {
+        requestedUrls.push(url);
+        return jsonResponse(200, {
+          success: true,
+          data: {
+            items: [
+              makeItem({
+                kind: 'REFUND',
+                amount: 300,
+                method: 'CASH',
+              }),
+            ],
+            summary: { collected: 0, refunded: 300, net: -300 },
+            nextCursor: null,
+          } satisfies PaymentLedgerPageDto,
+        });
+      }
+      return undefined;
+    });
+
+    render(
+      <ThemeBoundary>
+        <PaymentsPage />
+      </ThemeBoundary>,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Payments' })).toBeVisible();
+    const totalsRegion = screen.getByRole('region', { name: 'Payment totals' });
+    expect(within(totalsRegion).getByText('−300 BDT')).toBeVisible();
+
+    const callsBefore = requestedUrls.length;
+    const fromInput = screen.getByLabelText('From date');
+    const toInput = screen.getByLabelText('To date');
+    await user.clear(fromInput);
+    await user.type(fromInput, '2026-12-20');
+    await user.clear(toInput);
+    await user.type(toInput, '2026-12-01');
+
+    expect(await screen.findByText('Start date must be on or before end date.')).toBeVisible();
+    expect(requestedUrls).toHaveLength(callsBefore);
+
+    await user.click(screen.getAllByRole('button', { name: 'Reset filters' })[0]);
+    await waitFor(() => {
+      expect(requestedUrls.length).toBeGreaterThan(callsBefore);
+    });
+    expect(screen.queryByText('Start date must be on or before end date.')).not.toBeInTheDocument();
+  });
 });

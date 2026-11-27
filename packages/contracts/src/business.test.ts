@@ -111,4 +111,12 @@ describe('business response contract', () => {
       BUSINESS: 'Business',
     });
   });
+
+  // covers spec 0010 AC-16: live database-verified role on GET /api/business/me
+  it('accepts OWNER, STAFF, or omitted role and rejects unknown roles', () => {
+    expect(BusinessResponseSchema.parse(baseResponse({ role: 'OWNER' })).data.role).toBe('OWNER');
+    expect(BusinessResponseSchema.parse(baseResponse({ role: 'STAFF' })).data.role).toBe('STAFF');
+    expect(BusinessResponseSchema.parse(baseResponse()).data.role).toBeUndefined();
+    expect(BusinessResponseSchema.safeParse(baseResponse({ role: 'ADMIN' })).success).toBe(false);
+  });
 });
