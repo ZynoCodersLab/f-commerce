@@ -5,3 +5,6 @@ node_modules
 .env
 dist/
 test-results/
+.claude
+.agents
+skills-lock.json
