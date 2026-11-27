@@ -352,17 +352,20 @@ export function Dialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" role="presentation">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-ink/40 p-4"
+      role="presentation"
+    >
       <div
         aria-describedby={description ? descriptionId : undefined}
         aria-labelledby={titleId}
         aria-modal="true"
-        className="w-full max-w-lg rounded-lg border border-border bg-surface p-6 shadow-panel"
+        className="flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col rounded-lg border border-border bg-surface shadow-panel"
         ref={ref}
         role="dialog"
         tabIndex={-1}
       >
-        <div className="mb-5 flex items-start justify-between gap-4">
+        <div className="flex shrink-0 items-start justify-between gap-4 px-6 pt-6 pb-5">
           <div>
             <h2 className="text-xl font-semibold text-ink" id={titleId}>
               {title}
@@ -377,7 +380,7 @@ export function Dialog({
             Close
           </IconButton>
         </div>
-        {children}
+        <div className="min-h-0 overflow-y-auto px-6 pb-6">{children}</div>
       </div>
     </div>
   );
